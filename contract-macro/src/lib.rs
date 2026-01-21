@@ -67,8 +67,11 @@ struct FunctionInfo {
     doc: Option<String>,
     params: Vec<ParameterInfo>,
     input_type: TokenStream2,
+    /// The output type (dereferenced if the method returns a reference).
     output_type: TokenStream2,
     is_custom: bool,
+    /// Whether the method returns a reference (requires `.clone()` in wrapper).
+    returns_ref: bool,
 }
 
 /// Information about an event extracted from `abi::emit()` calls.
@@ -285,8 +288,8 @@ fn extract_public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
             // Extract input type (parameters after self)
             let input_type = extract_input_type(&params);
 
-            // Extract output type
-            let output_type = extract_output_type(&method.sig.output);
+            // Extract output type (dereferenced if it's a reference)
+            let (output_type, returns_ref) = extract_output_type(&method.sig.output);
 
             functions.push(FunctionInfo {
                 name,
@@ -295,6 +298,7 @@ fn extract_public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
                 input_type,
                 output_type,
                 is_custom,
+                returns_ref,
             });
         }
     }
@@ -382,10 +386,21 @@ fn extract_input_type(params: &[ParameterInfo]) -> TokenStream2 {
 }
 
 /// Extract the output type from a return type.
-fn extract_output_type(ret: &ReturnType) -> TokenStream2 {
+///
+/// If the return type is a reference (`&T` or `&mut T`), returns the inner type
+/// and `true`. Otherwise returns the type as-is and `false`.
+fn extract_output_type(ret: &ReturnType) -> (TokenStream2, bool) {
     match ret {
-        ReturnType::Default => quote! { () },
-        ReturnType::Type(_, ty) => quote! { #ty },
+        ReturnType::Default => (quote! { () }, false),
+        ReturnType::Type(_, ty) => {
+            // Check if it's a reference type
+            if let Type::Reference(type_ref) = &**ty {
+                let inner = &type_ref.elem;
+                (quote! { #inner }, true)
+            } else {
+                (quote! { #ty }, false)
+            }
+        }
     }
 }
 
@@ -480,6 +495,7 @@ fn generate_schema(
 /// Generate extern "C" wrapper functions for all public methods.
 ///
 /// Each wrapper deserializes input, calls the method on STATE, and serializes output.
+/// For methods that return references, the wrapper clones the result before serialization.
 fn generate_extern_wrappers(functions: &[FunctionInfo]) -> TokenStream2 {
     let wrappers: Vec<_> = functions
         .iter()
@@ -510,10 +526,17 @@ fn generate_extern_wrappers(functions: &[FunctionInfo]) -> TokenStream2 {
                 }
             };
 
+            // If the method returns a reference, clone the result for serialization
+            let method_call = if f.returns_ref {
+                quote! { STATE.#fn_name(#method_args).clone() }
+            } else {
+                quote! { STATE.#fn_name(#method_args) }
+            };
+
             quote! {
                 #[no_mangle]
                 unsafe extern "C" fn #fn_name(arg_len: u32) -> u32 {
-                    dusk_core::abi::wrap_call(arg_len, |#closure_param| STATE.#fn_name(#method_args))
+                    dusk_core::abi::wrap_call(arg_len, |#closure_param| #method_call)
                 }
             }
         })
@@ -970,6 +993,7 @@ mod tests {
             input_type: quote! { () },
             output_type: quote! { bool },
             is_custom: false,
+            returns_ref: false,
         }];
 
         let output = normalize_tokens(generate_extern_wrappers(&functions));
@@ -1001,6 +1025,7 @@ mod tests {
             input_type: quote! { Address },
             output_type: quote! { () },
             is_custom: false,
+            returns_ref: false,
         }];
 
         let output = normalize_tokens(generate_extern_wrappers(&functions));
@@ -1038,6 +1063,7 @@ mod tests {
             input_type: quote! { (Address, u64) },
             output_type: quote! { () },
             is_custom: false,
+            returns_ref: false,
         }];
 
         let output = normalize_tokens(generate_extern_wrappers(&functions));
@@ -1067,6 +1093,7 @@ mod tests {
                 input_type: quote! { () },
                 output_type: quote! { () },
                 is_custom: false,
+                returns_ref: false,
             },
             FunctionInfo {
                 name: format_ident!("unpause"),
@@ -1075,6 +1102,7 @@ mod tests {
                 input_type: quote! { () },
                 output_type: quote! { () },
                 is_custom: false,
+                returns_ref: false,
             },
         ];
 
@@ -1150,5 +1178,58 @@ mod tests {
         };
         let err = validate_public_method(&method).unwrap_err();
         assert!(err.to_string().contains("cannot be async"));
+    }
+
+    #[test]
+    fn test_extract_output_type_value() {
+        let ret: ReturnType = syn::parse_quote! { -> u64 };
+        let (ty, returns_ref) = extract_output_type(&ret);
+        assert_eq!(normalize_tokens(ty), "u64");
+        assert!(!returns_ref);
+    }
+
+    #[test]
+    fn test_extract_output_type_ref() {
+        let ret: ReturnType = syn::parse_quote! { -> &LargeStruct };
+        let (ty, returns_ref) = extract_output_type(&ret);
+        assert_eq!(normalize_tokens(ty), "LargeStruct");
+        assert!(returns_ref);
+    }
+
+    #[test]
+    fn test_extract_output_type_mut_ref() {
+        let ret: ReturnType = syn::parse_quote! { -> &mut Data };
+        let (ty, returns_ref) = extract_output_type(&ret);
+        assert_eq!(normalize_tokens(ty), "Data");
+        assert!(returns_ref);
+    }
+
+    #[test]
+    fn test_extern_wrapper_returns_ref() {
+        let functions = vec![FunctionInfo {
+            name: format_ident!("get_data"),
+            doc: None,
+            params: vec![],
+            input_type: quote! { () },
+            output_type: quote! { LargeStruct },
+            is_custom: false,
+            returns_ref: true,
+        }];
+
+        let output = normalize_tokens(generate_extern_wrappers(&functions));
+
+        let expected = normalize_tokens(quote! {
+            #[cfg(target_family = "wasm")]
+            mod __contract_extern_wrappers {
+                use super::*;
+
+                #[no_mangle]
+                unsafe extern "C" fn get_data(arg_len: u32) -> u32 {
+                    dusk_core::abi::wrap_call(arg_len, |(): ()| STATE.get_data().clone())
+                }
+            }
+        });
+
+        assert_eq!(expected, output);
     }
 }
