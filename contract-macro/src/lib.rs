@@ -58,7 +58,12 @@ struct ImportInfo {
 /// Information about a function parameter.
 struct ParameterInfo {
     name: Ident,
+    /// The type (dereferenced if the parameter is a reference).
     ty: TokenStream2,
+    /// Whether the parameter is a reference (requires `&` when passing to method).
+    is_ref: bool,
+    /// Whether the parameter is a mutable reference.
+    is_mut_ref: bool,
 }
 
 /// Information about a contract function extracted from the impl block.
@@ -307,6 +312,9 @@ fn extract_public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
 }
 
 /// Extract parameter names and types from a method (excluding self).
+///
+/// For reference parameters (`&T` or `&mut T`), extracts the inner type
+/// and marks them accordingly for wrapper generation.
 fn extract_parameters(method: &ImplItemFn) -> Vec<ParameterInfo> {
     method
         .sig
@@ -321,11 +329,24 @@ fn extract_parameters(method: &ImplItemFn) -> Vec<ParameterInfo> {
                     // Fallback for complex patterns
                     format_ident!("arg")
                 };
-                let ty = {
-                    let t = &pat_type.ty;
-                    quote! { #t }
-                };
-                Some(ParameterInfo { name, ty })
+
+                // Check if the type is a reference and extract inner type
+                let (ty, is_ref, is_mut_ref) =
+                    if let Type::Reference(type_ref) = &*pat_type.ty {
+                        let inner = &type_ref.elem;
+                        let is_mut = type_ref.mutability.is_some();
+                        (quote! { #inner }, true, is_mut)
+                    } else {
+                        let t = &pat_type.ty;
+                        (quote! { #t }, false, false)
+                    };
+
+                Some(ParameterInfo {
+                    name,
+                    ty,
+                    is_ref,
+                    is_mut_ref,
+                })
             } else {
                 None // Skip self parameters
             }
@@ -492,10 +513,25 @@ fn generate_schema(
     }
 }
 
+/// Generate the argument expression for passing to the method.
+///
+/// For reference parameters, adds `&` or `&mut` prefix.
+fn generate_arg_expr(param: &ParameterInfo) -> TokenStream2 {
+    let name = &param.name;
+    if param.is_mut_ref {
+        quote! { &mut #name }
+    } else if param.is_ref {
+        quote! { &#name }
+    } else {
+        quote! { #name }
+    }
+}
+
 /// Generate extern "C" wrapper functions for all public methods.
 ///
 /// Each wrapper deserializes input, calls the method on STATE, and serializes output.
-/// For methods that return references, the wrapper clones the result before serialization.
+/// - For methods that return references, the wrapper clones the result before serialization.
+/// - For parameters that are references, the wrapper receives the owned value and passes a reference.
 fn generate_extern_wrappers(functions: &[FunctionInfo]) -> TokenStream2 {
     let wrappers: Vec<_> = functions
         .iter()
@@ -514,14 +550,16 @@ fn generate_extern_wrappers(functions: &[FunctionInfo]) -> TokenStream2 {
                     let param = &f.params[0];
                     let name = &param.name;
                     let ty = &param.ty;
-                    (quote! { #name: #ty }, quote! { #name })
+                    let arg_expr = generate_arg_expr(param);
+                    (quote! { #name: #ty }, arg_expr)
                 }
                 _ => {
                     // Multiple parameters: |(p1, p2, ...): (T1, T2, ...)|
                     let names: Vec<_> = f.params.iter().map(|p| &p.name).collect();
+                    let arg_exprs: Vec<_> = f.params.iter().map(generate_arg_expr).collect();
                     (
                         quote! { (#(#names),*): #input_type },
-                        quote! { #(#names),* },
+                        quote! { #(#arg_exprs),* },
                     )
                 }
             };
@@ -1021,6 +1059,8 @@ mod tests {
             params: vec![ParameterInfo {
                 name: format_ident!("owner"),
                 ty: quote! { Address },
+                is_ref: false,
+                is_mut_ref: false,
             }],
             input_type: quote! { Address },
             output_type: quote! { () },
@@ -1054,10 +1094,14 @@ mod tests {
                 ParameterInfo {
                     name: format_ident!("to"),
                     ty: quote! { Address },
+                    is_ref: false,
+                    is_mut_ref: false,
                 },
                 ParameterInfo {
                     name: format_ident!("amount"),
                     ty: quote! { u64 },
+                    is_ref: false,
+                    is_mut_ref: false,
                 },
             ],
             input_type: quote! { (Address, u64) },
@@ -1231,5 +1275,99 @@ mod tests {
         });
 
         assert_eq!(expected, output);
+    }
+
+    #[test]
+    fn test_extern_wrapper_ref_param() {
+        let functions = vec![FunctionInfo {
+            name: format_ident!("process"),
+            doc: None,
+            params: vec![ParameterInfo {
+                name: format_ident!("data"),
+                ty: quote! { LargeStruct },
+                is_ref: true,
+                is_mut_ref: false,
+            }],
+            input_type: quote! { LargeStruct },
+            output_type: quote! { () },
+            is_custom: false,
+            returns_ref: false,
+        }];
+
+        let output = normalize_tokens(generate_extern_wrappers(&functions));
+
+        let expected = normalize_tokens(quote! {
+            #[cfg(target_family = "wasm")]
+            mod __contract_extern_wrappers {
+                use super::*;
+
+                #[no_mangle]
+                unsafe extern "C" fn process(arg_len: u32) -> u32 {
+                    dusk_core::abi::wrap_call(arg_len, |data: LargeStruct| STATE.process(&data))
+                }
+            }
+        });
+
+        assert_eq!(expected, output);
+    }
+
+    #[test]
+    fn test_extern_wrapper_mut_ref_param() {
+        let functions = vec![FunctionInfo {
+            name: format_ident!("modify"),
+            doc: None,
+            params: vec![ParameterInfo {
+                name: format_ident!("data"),
+                ty: quote! { Data },
+                is_ref: true,
+                is_mut_ref: true,
+            }],
+            input_type: quote! { Data },
+            output_type: quote! { () },
+            is_custom: false,
+            returns_ref: false,
+        }];
+
+        let output = normalize_tokens(generate_extern_wrappers(&functions));
+
+        let expected = normalize_tokens(quote! {
+            #[cfg(target_family = "wasm")]
+            mod __contract_extern_wrappers {
+                use super::*;
+
+                #[no_mangle]
+                unsafe extern "C" fn modify(arg_len: u32) -> u32 {
+                    dusk_core::abi::wrap_call(arg_len, |data: Data| STATE.modify(&mut data))
+                }
+            }
+        });
+
+        assert_eq!(expected, output);
+    }
+
+    #[test]
+    fn test_extract_parameters_ref() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn process(&self, data: &LargeStruct) {}
+        };
+        let params = extract_parameters(&method);
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name.to_string(), "data");
+        assert_eq!(normalize_tokens(params[0].ty.clone()), "LargeStruct");
+        assert!(params[0].is_ref);
+        assert!(!params[0].is_mut_ref);
+    }
+
+    #[test]
+    fn test_extract_parameters_mut_ref() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn modify(&mut self, data: &mut Data) {}
+        };
+        let params = extract_parameters(&method);
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name.to_string(), "data");
+        assert_eq!(normalize_tokens(params[0].ty.clone()), "Data");
+        assert!(params[0].is_ref);
+        assert!(params[0].is_mut_ref);
     }
 }
