@@ -1,5 +1,43 @@
 {
   "name": "TestBridge",
+  "imports": [
+    {
+      "name": "events",
+      "path": "evm_core::standard_bridge::events"
+    },
+    {
+      "name": "Deposit",
+      "path": "evm_core::standard_bridge::Deposit"
+    },
+    {
+      "name": "EVMAddress",
+      "path": "evm_core::standard_bridge::EVMAddress"
+    },
+    {
+      "name": "PendingWithdrawal",
+      "path": "evm_core::standard_bridge::PendingWithdrawal"
+    },
+    {
+      "name": "SetEVMAddressOrOffset",
+      "path": "evm_core::standard_bridge::SetEVMAddressOrOffset"
+    },
+    {
+      "name": "SetU64",
+      "path": "evm_core::standard_bridge::SetU64"
+    },
+    {
+      "name": "WithdrawalId",
+      "path": "evm_core::standard_bridge::WithdrawalId"
+    },
+    {
+      "name": "WithdrawalRequest",
+      "path": "evm_core::standard_bridge::WithdrawalRequest"
+    },
+    {
+      "name": "DSAddress",
+      "path": "evm_core::Address"
+    }
+  ],
   "functions": [
     {
       "name": "init",

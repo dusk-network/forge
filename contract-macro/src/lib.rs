@@ -5,6 +5,30 @@
 // Copyright (c) DUSK NETWORK. All rights reserved.
 
 //! Procedural macro for the `#[contract]` attribute.
+//!
+//! This macro is applied to a module containing a contract struct and its
+//! impl block. It extracts metadata about public methods and events, and
+//! generates a `CONTRACT_SCHEMA` constant plus extern "C" wrappers.
+//!
+//! # Example
+//!
+//! ```ignore
+//! #[contract]
+//! mod my_contract {
+//!     use evm_core::standard_bridge::SetU64;
+//!     use dusk_core::Address;
+//!
+//!     pub struct MyContract {
+//!         value: u64,
+//!     }
+//!
+//!     impl MyContract {
+//!         pub fn set_value(&mut self, value: SetU64) {
+//!             // ...
+//!         }
+//!     }
+//! }
+//! ```
 
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
@@ -18,9 +42,18 @@ use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{
     parse_macro_input, Attribute, Expr, ExprCall, ExprLit, ExprPath, FnArg, ImplItem,
-    ImplItemFn, ItemImpl, Lit, Pat, ReturnType, Type, Visibility,
-    visit::Visit,
+    ImplItemFn, Item, ItemImpl, ItemMod, ItemUse, Lit, Pat, ReturnType, Type, UseTree,
+    Visibility, visit::Visit,
 };
+
+/// Information about an imported type.
+#[derive(Clone)]
+struct ImportInfo {
+    /// The short name used in the contract (e.g., `SetU64`).
+    name: String,
+    /// The full path to the type (e.g., `evm_core::standard_bridge::SetU64`).
+    path: String,
+}
 
 /// Information about a function parameter.
 struct ParameterInfo {
@@ -133,6 +166,62 @@ fn extract_type_from_expr(expr: &Expr) -> TokenStream2 {
         }
         // Fallback - unknown type
         _ => quote! { () },
+    }
+}
+
+/// Extract imports from a `use` statement.
+fn extract_imports_from_use(item_use: &ItemUse, prefix: &str) -> Vec<ImportInfo> {
+    extract_imports_from_tree(&item_use.tree, prefix)
+}
+
+/// Recursively extract imports from a use tree.
+fn extract_imports_from_tree(tree: &UseTree, prefix: &str) -> Vec<ImportInfo> {
+    match tree {
+        UseTree::Path(path) => {
+            // Build the path prefix
+            let new_prefix = if prefix.is_empty() {
+                path.ident.to_string()
+            } else {
+                format!("{prefix}::{}", path.ident)
+            };
+            extract_imports_from_tree(&path.tree, &new_prefix)
+        }
+        UseTree::Name(name) => {
+            // Final name: use foo::bar::Baz;
+            let full_path = if prefix.is_empty() {
+                name.ident.to_string()
+            } else {
+                format!("{prefix}::{}", name.ident)
+            };
+            vec![ImportInfo {
+                name: name.ident.to_string(),
+                path: full_path,
+            }]
+        }
+        UseTree::Rename(rename) => {
+            // Renamed import: use foo::bar::Baz as Qux;
+            let full_path = if prefix.is_empty() {
+                rename.ident.to_string()
+            } else {
+                format!("{prefix}::{}", rename.ident)
+            };
+            vec![ImportInfo {
+                name: rename.rename.to_string(),
+                path: full_path,
+            }]
+        }
+        UseTree::Glob(_) => {
+            // Glob import: use foo::*; - we can't resolve these
+            vec![]
+        }
+        UseTree::Group(group) => {
+            // Group: use foo::{Bar, Baz};
+            group
+                .items
+                .iter()
+                .flat_map(|item| extract_imports_from_tree(item, prefix))
+                .collect()
+        }
     }
 }
 
@@ -274,10 +363,26 @@ fn extract_emit_calls(impl_block: &ItemImpl) -> Vec<EventInfo> {
 /// Generate the schema constant.
 fn generate_schema(
     contract_name: &str,
+    imports: &[ImportInfo],
     functions: &[FunctionInfo],
     events: &[EventInfo],
 ) -> TokenStream2 {
     let contract_name_lit = contract_name;
+
+    let import_entries: Vec<_> = imports
+        .iter()
+        .map(|i| {
+            let name = &i.name;
+            let path = &i.path;
+
+            quote! {
+                dusk_wasm::schema::ImportSchema {
+                    name: #name,
+                    path: #path,
+                }
+            }
+        })
+        .collect();
 
     let function_entries: Vec<_> = functions
         .iter()
@@ -323,8 +428,10 @@ fn generate_schema(
         .collect();
 
     quote! {
+        /// Contract schema containing metadata about functions, events, and imports.
         pub const CONTRACT_SCHEMA: dusk_wasm::schema::ContractSchema = dusk_wasm::schema::ContractSchema {
             name: #contract_name_lit,
+            imports: &[#(#import_entries),*],
             functions: &[#(#function_entries),*],
             events: &[#(#event_entries),*],
         };
@@ -394,41 +501,117 @@ fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
 }
 
 /// The main contract proc macro.
+///
+/// Applied to a module containing a contract struct and impl block.
+/// Extracts metadata and generates schema + extern wrappers.
 #[proc_macro_attribute]
 pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let impl_block = parse_macro_input!(item as ItemImpl);
+    let module = parse_macro_input!(item as ItemMod);
 
-    // Extract the contract name from the impl type
-    let contract_name = if let Type::Path(type_path) = &*impl_block.self_ty {
-        type_path
-            .path
-            .segments
-            .last()
-            .map_or_else(|| "Unknown".to_string(), |s| s.ident.to_string())
-    } else {
-        "Unknown".to_string()
+    // Module must have content (not just a declaration)
+    let Some((_, items)) = &module.content else {
+        return syn::Error::new_spanned(&module, "#[contract] requires a module with content")
+            .to_compile_error()
+            .into();
     };
 
-    // Extract functions and events
-    let functions = extract_public_methods(&impl_block);
-    let events = extract_emit_calls(&impl_block);
+    // Extract all use statements and build import map
+    let imports: Vec<ImportInfo> = items
+        .iter()
+        .filter_map(|item| {
+            if let Item::Use(item_use) = item {
+                Some(extract_imports_from_use(item_use, ""))
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .collect();
+
+    // Find the contract struct (first pub struct)
+    let contract_struct = items.iter().find_map(|item| {
+        if let Item::Struct(s) = item
+            && matches!(s.vis, Visibility::Public(_))
+        {
+            Some(s)
+        } else {
+            None
+        }
+    });
+
+    let Some(contract_struct) = contract_struct else {
+        return syn::Error::new_spanned(&module, "#[contract] module must contain a pub struct")
+            .to_compile_error()
+            .into();
+    };
+
+    let contract_name = contract_struct.ident.to_string();
+
+    // Find impl blocks for the contract struct
+    let impl_blocks: Vec<&ItemImpl> = items
+        .iter()
+        .filter_map(|item| {
+            if let Item::Impl(impl_block) = item
+                && impl_block.trait_.is_none()
+                && let Type::Path(type_path) = &*impl_block.self_ty
+                && type_path.path.is_ident(&contract_name)
+            {
+                Some(impl_block)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Extract functions and events from all impl blocks
+    let mut functions = Vec::new();
+    let mut events = Vec::new();
+
+    for impl_block in &impl_blocks {
+        functions.extend(extract_public_methods(impl_block));
+        events.extend(extract_emit_calls(impl_block));
+    }
+
+    // Deduplicate events by topic
+    let mut seen = std::collections::HashSet::new();
+    let events: Vec<_> = events.into_iter().filter(|e| seen.insert(e.topic.clone())).collect();
 
     // Generate schema
-    let schema = generate_schema(&contract_name, &functions, &events);
+    let schema = generate_schema(&contract_name, &imports, &functions, &events);
 
     // Generate extern "C" wrappers
     let externs = generate_extern_wrappers(&functions);
 
-    // Strip inner #[contract(...)] attributes before outputting the impl block
-    let impl_block = strip_contract_attributes(impl_block);
+    // Rebuild the module with stripped contract attributes on methods
+    let mod_vis = &module.vis;
+    let mod_name = &module.ident;
+    let mod_attrs = &module.attrs;
 
-    // Output: original impl block + schema + externs
+    let new_items: Vec<_> = items
+        .iter()
+        .map(|item| {
+            if let Item::Impl(impl_block) = item
+                && impl_block.trait_.is_none()
+                && let Type::Path(type_path) = &*impl_block.self_ty
+                && type_path.path.is_ident(&contract_name)
+            {
+                Item::Impl(strip_contract_attributes(impl_block.clone()))
+            } else {
+                item.clone()
+            }
+        })
+        .collect();
+
+    // Output: module with schema and externs added
     let output = quote! {
-        #impl_block
+        #(#mod_attrs)*
+        #mod_vis mod #mod_name {
+            #(#new_items)*
 
-        #schema
+            #schema
 
-        #externs
+            #externs
+        }
     };
 
     output.into()
@@ -446,6 +629,45 @@ mod tests {
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    #[test]
+    fn test_extract_imports_simple() {
+        let use_stmt: ItemUse = syn::parse_quote! {
+            use evm_core::standard_bridge::SetU64;
+        };
+        let imports = extract_imports_from_use(&use_stmt, "");
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].name, "SetU64");
+        assert_eq!(imports[0].path, "evm_core::standard_bridge::SetU64");
+    }
+
+    #[test]
+    fn test_extract_imports_renamed() {
+        let use_stmt: ItemUse = syn::parse_quote! {
+            use dusk_core::Address as DSAddress;
+        };
+        let imports = extract_imports_from_use(&use_stmt, "");
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].name, "DSAddress");
+        assert_eq!(imports[0].path, "dusk_core::Address");
+    }
+
+    #[test]
+    fn test_extract_imports_group() {
+        let use_stmt: ItemUse = syn::parse_quote! {
+            use evm_core::standard_bridge::{SetU64, Deposit, EVMAddress};
+        };
+        let imports = extract_imports_from_use(&use_stmt, "");
+        assert_eq!(imports.len(), 3);
+
+        let names: Vec<_> = imports.iter().map(|i| i.name.as_str()).collect();
+        assert!(names.contains(&"SetU64"));
+        assert!(names.contains(&"Deposit"));
+        assert!(names.contains(&"EVMAddress"));
+
+        let set_u64 = imports.iter().find(|i| i.name == "SetU64").unwrap();
+        assert_eq!(set_u64.path, "evm_core::standard_bridge::SetU64");
     }
 
     #[test]
