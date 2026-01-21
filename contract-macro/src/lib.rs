@@ -169,22 +169,40 @@ fn extract_type_from_expr(expr: &Expr) -> TokenStream2 {
     }
 }
 
+/// Result of extracting imports from a use statement.
+struct ImportExtraction {
+    imports: Vec<ImportInfo>,
+    has_glob: bool,
+    has_relative: bool,
+}
+
 /// Extract imports from a `use` statement.
-fn extract_imports_from_use(item_use: &ItemUse, prefix: &str) -> Vec<ImportInfo> {
-    extract_imports_from_tree(&item_use.tree, prefix)
+fn extract_imports_from_use(item_use: &ItemUse) -> ImportExtraction {
+    extract_imports_from_tree(&item_use.tree, "")
+}
+
+/// Check if an identifier is a relative path keyword.
+fn is_relative_path_keyword(ident: &str) -> bool {
+    matches!(ident, "self" | "super" | "crate")
 }
 
 /// Recursively extract imports from a use tree.
-fn extract_imports_from_tree(tree: &UseTree, prefix: &str) -> Vec<ImportInfo> {
+fn extract_imports_from_tree(tree: &UseTree, prefix: &str) -> ImportExtraction {
     match tree {
         UseTree::Path(path) => {
+            // Check if this is a relative path (self::, super::, crate::)
+            let is_relative =
+                prefix.is_empty() && is_relative_path_keyword(&path.ident.to_string());
+
             // Build the path prefix
             let new_prefix = if prefix.is_empty() {
                 path.ident.to_string()
             } else {
                 format!("{prefix}::{}", path.ident)
             };
-            extract_imports_from_tree(&path.tree, &new_prefix)
+            let mut extraction = extract_imports_from_tree(&path.tree, &new_prefix);
+            extraction.has_relative = extraction.has_relative || is_relative;
+            extraction
         }
         UseTree::Name(name) => {
             // Final name: use foo::bar::Baz;
@@ -193,10 +211,14 @@ fn extract_imports_from_tree(tree: &UseTree, prefix: &str) -> Vec<ImportInfo> {
             } else {
                 format!("{prefix}::{}", name.ident)
             };
-            vec![ImportInfo {
-                name: name.ident.to_string(),
-                path: full_path,
-            }]
+            ImportExtraction {
+                imports: vec![ImportInfo {
+                    name: name.ident.to_string(),
+                    path: full_path,
+                }],
+                has_glob: false,
+                has_relative: false,
+            }
         }
         UseTree::Rename(rename) => {
             // Renamed import: use foo::bar::Baz as Qux;
@@ -205,22 +227,39 @@ fn extract_imports_from_tree(tree: &UseTree, prefix: &str) -> Vec<ImportInfo> {
             } else {
                 format!("{prefix}::{}", rename.ident)
             };
-            vec![ImportInfo {
-                name: rename.rename.to_string(),
-                path: full_path,
-            }]
+            ImportExtraction {
+                imports: vec![ImportInfo {
+                    name: rename.rename.to_string(),
+                    path: full_path,
+                }],
+                has_glob: false,
+                has_relative: false,
+            }
         }
         UseTree::Glob(_) => {
             // Glob import: use foo::*; - we can't resolve these
-            vec![]
+            ImportExtraction {
+                imports: vec![],
+                has_glob: true,
+                has_relative: false,
+            }
         }
         UseTree::Group(group) => {
             // Group: use foo::{Bar, Baz};
-            group
-                .items
-                .iter()
-                .flat_map(|item| extract_imports_from_tree(item, prefix))
-                .collect()
+            let mut imports = Vec::new();
+            let mut has_glob = false;
+            let mut has_relative = false;
+            for item in &group.items {
+                let extraction = extract_imports_from_tree(item, prefix);
+                imports.extend(extraction.imports);
+                has_glob = has_glob || extraction.has_glob;
+                has_relative = has_relative || extraction.has_relative;
+            }
+            ImportExtraction {
+                imports,
+                has_glob,
+                has_relative,
+            }
         }
     }
 }
@@ -500,51 +539,86 @@ fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
     impl_block
 }
 
-/// The main contract proc macro.
+/// Validated contract module data extracted during parsing.
+struct ContractData<'a> {
+    imports: Vec<ImportInfo>,
+    contract_name: String,
+    impl_blocks: Vec<&'a ItemImpl>,
+}
+
+/// Validate the module and extract contract data.
 ///
-/// Applied to a module containing a contract struct and impl block.
-/// Extracts metadata and generates schema + extern wrappers.
-#[proc_macro_attribute]
-pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let module = parse_macro_input!(item as ItemMod);
+/// Returns an error if validation fails.
+fn validate_and_extract<'a>(
+    module: &'a ItemMod,
+    items: &'a [Item],
+) -> Result<ContractData<'a>, syn::Error> {
+    // Extract all use statements and build import map, checking for unsupported imports
+    let mut imports = Vec::new();
+    let mut glob_imports = Vec::new();
+    let mut relative_imports = Vec::new();
 
-    // Module must have content (not just a declaration)
-    let Some((_, items)) = &module.content else {
-        return syn::Error::new_spanned(&module, "#[contract] requires a module with content")
-            .to_compile_error()
-            .into();
-    };
+    for item in items {
+        if let Item::Use(item_use) = item {
+            let extraction = extract_imports_from_use(item_use);
+            imports.extend(extraction.imports);
+            if extraction.has_glob {
+                glob_imports.push(item_use);
+            }
+            if extraction.has_relative {
+                relative_imports.push(item_use);
+            }
+        }
+    }
 
-    // Extract all use statements and build import map
-    let imports: Vec<ImportInfo> = items
+    // Error on glob imports - we can't track their paths
+    if let Some(first_glob) = glob_imports.first() {
+        return Err(syn::Error::new_spanned(
+            first_glob,
+            "#[contract] does not support glob imports (`use foo::*`); \
+             import types explicitly so their paths can be tracked",
+        ));
+    }
+
+    // Error on relative imports - we need absolute paths for code generation
+    if let Some(first_relative) = relative_imports.first() {
+        return Err(syn::Error::new_spanned(
+            first_relative,
+            "#[contract] does not support relative imports (`use self::`, `use super::`, `use crate::`); \
+             use absolute paths so they can be resolved for code generation",
+        ));
+    }
+
+    // Find all pub structs and ensure there's exactly one
+    let pub_structs: Vec<_> = items
         .iter()
         .filter_map(|item| {
-            if let Item::Use(item_use) = item {
-                Some(extract_imports_from_use(item_use, ""))
+            if let Item::Struct(s) = item
+                && matches!(s.vis, Visibility::Public(_))
+            {
+                Some(s)
             } else {
                 None
             }
         })
-        .flatten()
         .collect();
 
-    // Find the contract struct (first pub struct)
-    let contract_struct = items.iter().find_map(|item| {
-        if let Item::Struct(s) = item
-            && matches!(s.vis, Visibility::Public(_))
-        {
-            Some(s)
-        } else {
-            None
-        }
-    });
+    if pub_structs.is_empty() {
+        return Err(syn::Error::new_spanned(
+            module,
+            "#[contract] module must contain a pub struct for the contract state",
+        ));
+    }
 
-    let Some(contract_struct) = contract_struct else {
-        return syn::Error::new_spanned(&module, "#[contract] module must contain a pub struct")
-            .to_compile_error()
-            .into();
-    };
+    if pub_structs.len() > 1 {
+        return Err(syn::Error::new_spanned(
+            pub_structs[1],
+            "#[contract] module must contain exactly one pub struct; \
+             found multiple public structs",
+        ));
+    }
 
+    let contract_struct = pub_structs[0];
     let contract_name = contract_struct.ident.to_string();
 
     // Find impl blocks for the contract struct
@@ -562,6 +636,58 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         })
         .collect();
+
+    // Ensure there's at least one impl block
+    if impl_blocks.is_empty() {
+        return Err(syn::Error::new_spanned(
+            contract_struct,
+            format!("#[contract] module must contain an impl block for `{contract_name}`"),
+        ));
+    }
+
+    Ok(ContractData {
+        imports,
+        contract_name,
+        impl_blocks,
+    })
+}
+
+/// The main contract proc macro.
+///
+/// Applied to a module containing a contract struct and impl block.
+/// Extracts metadata and generates schema + extern wrappers.
+///
+/// # Errors
+///
+/// This macro will produce compile errors if:
+/// - The module has no content (just a declaration like `mod foo;`)
+/// - The module contains glob imports (`use foo::*`)
+/// - The module contains relative imports (`use self::`, `use super::`, `use crate::`)
+/// - The module contains multiple `pub struct` declarations
+/// - The module contains no `pub struct`
+/// - The module contains no impl block for the contract struct
+#[proc_macro_attribute]
+pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let module = parse_macro_input!(item as ItemMod);
+
+    // Module must have content (not just a declaration)
+    let Some((_, items)) = &module.content else {
+        return syn::Error::new_spanned(&module, "#[contract] requires a module with content")
+            .to_compile_error()
+            .into();
+    };
+
+    // Validate and extract contract data
+    let data = match validate_and_extract(&module, items) {
+        Ok(data) => data,
+        Err(e) => return e.to_compile_error().into(),
+    };
+
+    let ContractData {
+        imports,
+        contract_name,
+        impl_blocks,
+    } = data;
 
     // Extract functions and events from all impl blocks
     let mut functions = Vec::new();
@@ -636,10 +762,12 @@ mod tests {
         let use_stmt: ItemUse = syn::parse_quote! {
             use evm_core::standard_bridge::SetU64;
         };
-        let imports = extract_imports_from_use(&use_stmt, "");
-        assert_eq!(imports.len(), 1);
-        assert_eq!(imports[0].name, "SetU64");
-        assert_eq!(imports[0].path, "evm_core::standard_bridge::SetU64");
+        let extraction = extract_imports_from_use(&use_stmt);
+        assert_eq!(extraction.imports.len(), 1);
+        assert_eq!(extraction.imports[0].name, "SetU64");
+        assert_eq!(extraction.imports[0].path, "evm_core::standard_bridge::SetU64");
+        assert!(!extraction.has_glob);
+        assert!(!extraction.has_relative);
     }
 
     #[test]
@@ -647,10 +775,12 @@ mod tests {
         let use_stmt: ItemUse = syn::parse_quote! {
             use dusk_core::Address as DSAddress;
         };
-        let imports = extract_imports_from_use(&use_stmt, "");
-        assert_eq!(imports.len(), 1);
-        assert_eq!(imports[0].name, "DSAddress");
-        assert_eq!(imports[0].path, "dusk_core::Address");
+        let extraction = extract_imports_from_use(&use_stmt);
+        assert_eq!(extraction.imports.len(), 1);
+        assert_eq!(extraction.imports[0].name, "DSAddress");
+        assert_eq!(extraction.imports[0].path, "dusk_core::Address");
+        assert!(!extraction.has_glob);
+        assert!(!extraction.has_relative);
     }
 
     #[test]
@@ -658,16 +788,91 @@ mod tests {
         let use_stmt: ItemUse = syn::parse_quote! {
             use evm_core::standard_bridge::{SetU64, Deposit, EVMAddress};
         };
-        let imports = extract_imports_from_use(&use_stmt, "");
-        assert_eq!(imports.len(), 3);
+        let extraction = extract_imports_from_use(&use_stmt);
+        assert_eq!(extraction.imports.len(), 3);
+        assert!(!extraction.has_glob);
+        assert!(!extraction.has_relative);
 
-        let names: Vec<_> = imports.iter().map(|i| i.name.as_str()).collect();
+        let names: Vec<_> = extraction.imports.iter().map(|i| i.name.as_str()).collect();
         assert!(names.contains(&"SetU64"));
         assert!(names.contains(&"Deposit"));
         assert!(names.contains(&"EVMAddress"));
 
-        let set_u64 = imports.iter().find(|i| i.name == "SetU64").unwrap();
+        let set_u64 = extraction.imports.iter().find(|i| i.name == "SetU64").unwrap();
         assert_eq!(set_u64.path, "evm_core::standard_bridge::SetU64");
+    }
+
+    #[test]
+    fn test_extract_imports_glob() {
+        let use_stmt: ItemUse = syn::parse_quote! {
+            use evm_core::standard_bridge::*;
+        };
+        let extraction = extract_imports_from_use(&use_stmt);
+        assert!(extraction.imports.is_empty());
+        assert!(extraction.has_glob);
+        assert!(!extraction.has_relative);
+    }
+
+    #[test]
+    fn test_extract_imports_group_with_glob() {
+        let use_stmt: ItemUse = syn::parse_quote! {
+            use evm_core::standard_bridge::{SetU64, events::*};
+        };
+        let extraction = extract_imports_from_use(&use_stmt);
+        assert_eq!(extraction.imports.len(), 1);
+        assert_eq!(extraction.imports[0].name, "SetU64");
+        assert!(extraction.has_glob);
+        assert!(!extraction.has_relative);
+    }
+
+    #[test]
+    fn test_extract_imports_relative_self() {
+        let use_stmt: ItemUse = syn::parse_quote! {
+            use self::types::MyType;
+        };
+        let extraction = extract_imports_from_use(&use_stmt);
+        assert_eq!(extraction.imports.len(), 1);
+        assert_eq!(extraction.imports[0].name, "MyType");
+        assert_eq!(extraction.imports[0].path, "self::types::MyType");
+        assert!(!extraction.has_glob);
+        assert!(extraction.has_relative);
+    }
+
+    #[test]
+    fn test_extract_imports_relative_super() {
+        let use_stmt: ItemUse = syn::parse_quote! {
+            use super::common::SharedType;
+        };
+        let extraction = extract_imports_from_use(&use_stmt);
+        assert_eq!(extraction.imports.len(), 1);
+        assert_eq!(extraction.imports[0].name, "SharedType");
+        assert_eq!(extraction.imports[0].path, "super::common::SharedType");
+        assert!(!extraction.has_glob);
+        assert!(extraction.has_relative);
+    }
+
+    #[test]
+    fn test_extract_imports_relative_crate() {
+        let use_stmt: ItemUse = syn::parse_quote! {
+            use crate::utils::Helper;
+        };
+        let extraction = extract_imports_from_use(&use_stmt);
+        assert_eq!(extraction.imports.len(), 1);
+        assert_eq!(extraction.imports[0].name, "Helper");
+        assert_eq!(extraction.imports[0].path, "crate::utils::Helper");
+        assert!(!extraction.has_glob);
+        assert!(extraction.has_relative);
+    }
+
+    #[test]
+    fn test_extract_imports_group_with_relative() {
+        let use_stmt: ItemUse = syn::parse_quote! {
+            use self::types::{TypeA, TypeB};
+        };
+        let extraction = extract_imports_from_use(&use_stmt);
+        assert_eq!(extraction.imports.len(), 2);
+        assert!(!extraction.has_glob);
+        assert!(extraction.has_relative);
     }
 
     #[test]
