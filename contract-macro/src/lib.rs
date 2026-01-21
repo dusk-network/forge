@@ -1,0 +1,589 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) DUSK NETWORK. All rights reserved.
+
+//! Procedural macro for the `#[contract]` attribute.
+
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![deny(unused_must_use)]
+#![deny(unused_extern_crates)]
+#![deny(clippy::pedantic)]
+#![warn(missing_debug_implementations, unreachable_pub, rustdoc::all)]
+
+use proc_macro::TokenStream;
+use proc_macro2::{Ident, TokenStream as TokenStream2};
+use quote::{format_ident, quote};
+use syn::{
+    parse_macro_input, Attribute, Expr, ExprCall, ExprLit, ExprPath, FnArg, ImplItem,
+    ImplItemFn, ItemImpl, Lit, Pat, ReturnType, Type, Visibility,
+    visit::Visit,
+};
+
+/// Information about a function parameter.
+struct ParameterInfo {
+    name: Ident,
+    ty: TokenStream2,
+}
+
+/// Information about a contract function extracted from the impl block.
+struct FunctionInfo {
+    name: Ident,
+    doc: Option<String>,
+    params: Vec<ParameterInfo>,
+    input_type: TokenStream2,
+    output_type: TokenStream2,
+    is_custom: bool,
+}
+
+/// Information about an event extracted from `abi::emit()` calls.
+struct EventInfo {
+    topic: String,
+    data_type: TokenStream2,
+}
+
+/// Visitor to find `abi::emit()` calls within function bodies.
+struct EmitVisitor {
+    events: Vec<EventInfo>,
+}
+
+impl EmitVisitor {
+    fn new() -> Self {
+        Self { events: Vec::new() }
+    }
+}
+
+impl<'ast> Visit<'ast> for EmitVisitor {
+    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
+        // Check if this is an abi::emit() call
+        if let Expr::Path(ExprPath { path, .. }) = &*node.func {
+            let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+
+            // Match abi::emit or just emit
+            let is_emit = matches!(
+                segments.iter().map(String::as_str).collect::<Vec<_>>().as_slice(),
+                ["abi", "emit"] | ["emit"]
+            );
+
+            if is_emit && node.args.len() >= 2 {
+                // First arg is the topic - can be a string literal or a const path
+                let topic = extract_topic_from_expr(node.args.first().unwrap());
+
+                if let Some(topic) = topic {
+                    // Second arg is the event data - extract its type
+                    let data_expr = &node.args[1];
+                    let data_type = extract_type_from_expr(data_expr);
+
+                    self.events.push(EventInfo { topic, data_type });
+                }
+            }
+        }
+
+        // Continue visiting nested expressions
+        syn::visit::visit_expr_call(self, node);
+    }
+}
+
+/// Extract topic string from the first argument of `abi::emit()`.
+/// Handles both string literals and const path expressions.
+fn extract_topic_from_expr(expr: &Expr) -> Option<String> {
+    match expr {
+        // String literal: "topic_name"
+        Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => Some(s.value()),
+        // Path expression: Type::TOPIC or module::Type::TOPIC
+        Expr::Path(path) => {
+            // Convert the path to a string representation
+            Some(
+                path.path
+                    .segments
+                    .iter()
+                    .map(|s| s.ident.to_string())
+                    .collect::<Vec<_>>()
+                    .join("::"),
+            )
+        }
+        _ => None,
+    }
+}
+
+/// Attempt to extract a type from an expression.
+/// This handles common patterns like `Type { .. }`, `Type()`, `Type::new()`.
+fn extract_type_from_expr(expr: &Expr) -> TokenStream2 {
+    match expr {
+        // Handle struct instantiation: events::PauseToggled { ... } or PauseToggled { ... }
+        Expr::Struct(s) => {
+            let path = &s.path;
+            quote! { #path }
+        }
+        // Handle unit struct or tuple struct: events::PauseToggled() or PauseToggled()
+        Expr::Call(call) => {
+            if let Expr::Path(path) = &*call.func {
+                let p = &path.path;
+                quote! { #p }
+            } else {
+                quote! { () }
+            }
+        }
+        // Handle path expressions: events::PauseToggled
+        Expr::Path(path) => {
+            let p = &path.path;
+            quote! { #p }
+        }
+        // Fallback - unknown type
+        _ => quote! { () },
+    }
+}
+
+/// Extract public methods from an impl block.
+fn extract_public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
+    let mut functions = Vec::new();
+
+    for item in &impl_block.items {
+        if let ImplItem::Fn(method) = item {
+            // Only process public methods
+            if !matches!(method.vis, Visibility::Public(_)) {
+                continue;
+            }
+
+            let name = method.sig.ident.clone();
+            let doc = extract_doc_comment(&method.attrs);
+            let is_custom = has_custom_attribute(&method.attrs);
+
+            // Extract parameters (name and type)
+            let params = extract_parameters(method);
+
+            // Extract input type (parameters after self)
+            let input_type = extract_input_type(&params);
+
+            // Extract output type
+            let output_type = extract_output_type(&method.sig.output);
+
+            functions.push(FunctionInfo {
+                name,
+                doc,
+                params,
+                input_type,
+                output_type,
+                is_custom,
+            });
+        }
+    }
+
+    functions
+}
+
+/// Extract parameter names and types from a method (excluding self).
+fn extract_parameters(method: &ImplItemFn) -> Vec<ParameterInfo> {
+    method
+        .sig
+        .inputs
+        .iter()
+        .filter_map(|arg| {
+            if let FnArg::Typed(pat_type) = arg {
+                // Extract parameter name from pattern
+                let name = if let Pat::Ident(pat_ident) = &*pat_type.pat {
+                    pat_ident.ident.clone()
+                } else {
+                    // Fallback for complex patterns
+                    format_ident!("arg")
+                };
+                let ty = {
+                    let t = &pat_type.ty;
+                    quote! { #t }
+                };
+                Some(ParameterInfo { name, ty })
+            } else {
+                None // Skip self parameters
+            }
+        })
+        .collect()
+}
+
+/// Extract doc comments from attributes.
+fn extract_doc_comment(attrs: &[Attribute]) -> Option<String> {
+    let docs: Vec<String> = attrs
+        .iter()
+        .filter_map(|attr| {
+            if attr.path().is_ident("doc")
+                && let syn::Meta::NameValue(meta) = &attr.meta
+                && let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = &meta.value
+            {
+                return Some(s.value().trim().to_string());
+            }
+            None
+        })
+        .collect();
+
+    if docs.is_empty() {
+        None
+    } else {
+        Some(docs.join(" "))
+    }
+}
+
+/// Check if method has #[contract(custom)] attribute.
+fn has_custom_attribute(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if attr.path().is_ident("contract") {
+            // Parse the attribute arguments
+            if let Ok(meta) = attr.meta.require_list() {
+                let tokens = meta.tokens.to_string();
+                return tokens.contains("custom");
+            }
+        }
+        false
+    })
+}
+
+/// Build the input type from extracted parameters.
+fn extract_input_type(params: &[ParameterInfo]) -> TokenStream2 {
+    match params.len() {
+        0 => quote! { () },
+        1 => {
+            let ty = &params[0].ty;
+            quote! { #ty }
+        }
+        _ => {
+            // Multiple parameters - create a tuple type
+            let types: Vec<_> = params.iter().map(|p| &p.ty).collect();
+            quote! { (#(#types),*) }
+        }
+    }
+}
+
+/// Extract the output type from a return type.
+fn extract_output_type(ret: &ReturnType) -> TokenStream2 {
+    match ret {
+        ReturnType::Default => quote! { () },
+        ReturnType::Type(_, ty) => quote! { #ty },
+    }
+}
+
+/// Extract all `abi::emit()` calls from an impl block.
+fn extract_emit_calls(impl_block: &ItemImpl) -> Vec<EventInfo> {
+    let mut visitor = EmitVisitor::new();
+    visitor.visit_item_impl(impl_block);
+
+    // Deduplicate events by topic (keep first occurrence)
+    let mut seen = std::collections::HashSet::new();
+    visitor.events.into_iter().filter(|e| seen.insert(e.topic.clone())).collect()
+}
+
+/// Generate the schema constant.
+fn generate_schema(
+    contract_name: &str,
+    functions: &[FunctionInfo],
+    events: &[EventInfo],
+) -> TokenStream2 {
+    let contract_name_lit = contract_name;
+
+    let function_entries: Vec<_> = functions
+        .iter()
+        .map(|f| {
+            let name_str = f.name.to_string();
+            let doc = f.doc.as_deref().unwrap_or("");
+            let input = &f.input_type;
+            let output = &f.output_type;
+            let custom = f.is_custom;
+
+            // Convert type tokens to string for the schema
+            let input_str = input.to_string();
+            let output_str = output.to_string();
+
+            quote! {
+                dusk_wasm::schema::FunctionSchema {
+                    name: #name_str,
+                    doc: #doc,
+                    input: #input_str,
+                    output: #output_str,
+                    custom: #custom,
+                }
+            }
+        })
+        .collect();
+
+    let event_entries: Vec<_> = events
+        .iter()
+        .map(|e| {
+            let topic = &e.topic;
+            let data = &e.data_type;
+
+            // Convert type tokens to string for the schema
+            let data_str = data.to_string();
+
+            quote! {
+                dusk_wasm::schema::EventSchema {
+                    topic: #topic,
+                    data: #data_str,
+                }
+            }
+        })
+        .collect();
+
+    quote! {
+        pub const CONTRACT_SCHEMA: dusk_wasm::schema::ContractSchema = dusk_wasm::schema::ContractSchema {
+            name: #contract_name_lit,
+            functions: &[#(#function_entries),*],
+            events: &[#(#event_entries),*],
+        };
+    }
+}
+
+/// Generate extern "C" wrapper functions for all public methods.
+///
+/// Each wrapper deserializes input, calls the method on STATE, and serializes output.
+fn generate_extern_wrappers(functions: &[FunctionInfo]) -> TokenStream2 {
+    let wrappers: Vec<_> = functions
+        .iter()
+        .map(|f| {
+            let fn_name = &f.name;
+            let input_type = &f.input_type;
+
+            // Build the closure parameter pattern and the method call arguments
+            let (closure_param, method_args) = match f.params.len() {
+                0 => {
+                    // No parameters: |(): ()|
+                    (quote! { (): () }, quote! {})
+                }
+                1 => {
+                    // Single parameter: |name: Type|
+                    let param = &f.params[0];
+                    let name = &param.name;
+                    let ty = &param.ty;
+                    (quote! { #name: #ty }, quote! { #name })
+                }
+                _ => {
+                    // Multiple parameters: |(p1, p2, ...): (T1, T2, ...)|
+                    let names: Vec<_> = f.params.iter().map(|p| &p.name).collect();
+                    (
+                        quote! { (#(#names),*): #input_type },
+                        quote! { #(#names),* },
+                    )
+                }
+            };
+
+            quote! {
+                #[no_mangle]
+                unsafe extern "C" fn #fn_name(arg_len: u32) -> u32 {
+                    dusk_core::abi::wrap_call(arg_len, |#closure_param| STATE.#fn_name(#method_args))
+                }
+            }
+        })
+        .collect();
+
+    quote! {
+        #[cfg(target_family = "wasm")]
+        mod __contract_extern_wrappers {
+            use super::*;
+
+            #(#wrappers)*
+        }
+    }
+}
+
+/// Strip #[contract(...)] attributes from methods in the impl block.
+fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
+    for item in &mut impl_block.items {
+        if let ImplItem::Fn(method) = item {
+            method.attrs.retain(|attr| !attr.path().is_ident("contract"));
+        }
+    }
+    impl_block
+}
+
+/// The main contract proc macro.
+#[proc_macro_attribute]
+pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let impl_block = parse_macro_input!(item as ItemImpl);
+
+    // Extract the contract name from the impl type
+    let contract_name = if let Type::Path(type_path) = &*impl_block.self_ty {
+        type_path
+            .path
+            .segments
+            .last()
+            .map_or_else(|| "Unknown".to_string(), |s| s.ident.to_string())
+    } else {
+        "Unknown".to_string()
+    };
+
+    // Extract functions and events
+    let functions = extract_public_methods(&impl_block);
+    let events = extract_emit_calls(&impl_block);
+
+    // Generate schema
+    let schema = generate_schema(&contract_name, &functions, &events);
+
+    // Generate extern "C" wrappers
+    let externs = generate_extern_wrappers(&functions);
+
+    // Strip inner #[contract(...)] attributes before outputting the impl block
+    let impl_block = strip_contract_attributes(impl_block);
+
+    // Output: original impl block + schema + externs
+    let output = quote! {
+        #impl_block
+
+        #schema
+
+        #externs
+    };
+
+    output.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quote::format_ident;
+
+    fn normalize_tokens(tokens: TokenStream2) -> String {
+        // Normalize whitespace for comparison
+        tokens
+            .to_string()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    #[test]
+    fn test_extern_wrapper_no_params() {
+        let functions = vec![FunctionInfo {
+            name: format_ident!("is_paused"),
+            doc: Some("Returns pause state.".to_string()),
+            params: vec![],
+            input_type: quote! { () },
+            output_type: quote! { bool },
+            is_custom: false,
+        }];
+
+        let output = normalize_tokens(generate_extern_wrappers(&functions));
+
+        let expected = normalize_tokens(quote! {
+            #[cfg(target_family = "wasm")]
+            mod __contract_extern_wrappers {
+                use super::*;
+
+                #[no_mangle]
+                unsafe extern "C" fn is_paused(arg_len: u32) -> u32 {
+                    dusk_core::abi::wrap_call(arg_len, |(): ()| STATE.is_paused())
+                }
+            }
+        });
+
+        assert_eq!(expected, output);
+    }
+
+    #[test]
+    fn test_extern_wrapper_single_param() {
+        let functions = vec![FunctionInfo {
+            name: format_ident!("init"),
+            doc: Some("Initialize.".to_string()),
+            params: vec![ParameterInfo {
+                name: format_ident!("owner"),
+                ty: quote! { Address },
+            }],
+            input_type: quote! { Address },
+            output_type: quote! { () },
+            is_custom: false,
+        }];
+
+        let output = normalize_tokens(generate_extern_wrappers(&functions));
+
+        let expected = normalize_tokens(quote! {
+            #[cfg(target_family = "wasm")]
+            mod __contract_extern_wrappers {
+                use super::*;
+
+                #[no_mangle]
+                unsafe extern "C" fn init(arg_len: u32) -> u32 {
+                    dusk_core::abi::wrap_call(arg_len, |owner: Address| STATE.init(owner))
+                }
+            }
+        });
+
+        assert_eq!(expected, output);
+    }
+
+    #[test]
+    fn test_extern_wrapper_multiple_params() {
+        let functions = vec![FunctionInfo {
+            name: format_ident!("transfer"),
+            doc: Some("Transfer funds.".to_string()),
+            params: vec![
+                ParameterInfo {
+                    name: format_ident!("to"),
+                    ty: quote! { Address },
+                },
+                ParameterInfo {
+                    name: format_ident!("amount"),
+                    ty: quote! { u64 },
+                },
+            ],
+            input_type: quote! { (Address, u64) },
+            output_type: quote! { () },
+            is_custom: false,
+        }];
+
+        let output = normalize_tokens(generate_extern_wrappers(&functions));
+
+        let expected = normalize_tokens(quote! {
+            #[cfg(target_family = "wasm")]
+            mod __contract_extern_wrappers {
+                use super::*;
+
+                #[no_mangle]
+                unsafe extern "C" fn transfer(arg_len: u32) -> u32 {
+                    dusk_core::abi::wrap_call(arg_len, |(to, amount): (Address, u64)| STATE.transfer(to, amount))
+                }
+            }
+        });
+
+        assert_eq!(expected, output);
+    }
+
+    #[test]
+    fn test_extern_wrappers_multiple_functions() {
+        let functions = vec![
+            FunctionInfo {
+                name: format_ident!("pause"),
+                doc: None,
+                params: vec![],
+                input_type: quote! { () },
+                output_type: quote! { () },
+                is_custom: false,
+            },
+            FunctionInfo {
+                name: format_ident!("unpause"),
+                doc: None,
+                params: vec![],
+                input_type: quote! { () },
+                output_type: quote! { () },
+                is_custom: false,
+            },
+        ];
+
+        let output = normalize_tokens(generate_extern_wrappers(&functions));
+
+        let expected = normalize_tokens(quote! {
+            #[cfg(target_family = "wasm")]
+            mod __contract_extern_wrappers {
+                use super::*;
+
+                #[no_mangle]
+                unsafe extern "C" fn pause(arg_len: u32) -> u32 {
+                    dusk_core::abi::wrap_call(arg_len, |(): ()| STATE.pause())
+                }
+
+                #[no_mangle]
+                unsafe extern "C" fn unpause(arg_len: u32) -> u32 {
+                    dusk_core::abi::wrap_call(arg_len, |(): ()| STATE.unpause())
+                }
+            }
+        });
+
+        assert_eq!(expected, output);
+    }
+}

@@ -1,0 +1,16 @@
+[package]
+name = "dusk-wasm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+contract-macro = { path = "contract-macro" }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+
+[dev-dependencies]
+dusk-core = "1.4"
+evm-core = { path = "../DuskEVM/L1Contracts/core" }
+serde_json = "1"
+
+[workspace]
+members = ["contract-macro"]
