@@ -546,6 +546,83 @@ struct ContractData<'a> {
     impl_blocks: Vec<&'a ItemImpl>,
 }
 
+/// Validate that a public method has a supported signature for extern wrapper generation.
+///
+/// Returns an error if the method:
+/// - Has no `self` receiver (associated function)
+/// - Has generic type parameters
+/// - Is async
+/// - Consumes `self` (not `&self` or `&mut self`)
+fn validate_public_method(method: &ImplItemFn) -> Result<(), syn::Error> {
+    let name = &method.sig.ident;
+
+    // Check for generic type parameters
+    if !method.sig.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &method.sig.generics,
+            format!(
+                "public method `{name}` cannot have generic parameters; \
+                 extern \"C\" wrappers require concrete types"
+            ),
+        ));
+    }
+
+    // Check for async
+    if method.sig.asyncness.is_some() {
+        return Err(syn::Error::new_spanned(
+            method.sig.asyncness,
+            format!(
+                "public method `{name}` cannot be async; \
+                 WASM contracts do not support async execution"
+            ),
+        ));
+    }
+
+    // Check for self receiver
+    let receiver = method.sig.inputs.first().and_then(|arg| {
+        if let FnArg::Receiver(r) = arg {
+            Some(r)
+        } else {
+            None
+        }
+    });
+
+    let Some(receiver) = receiver else {
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            format!(
+                "public method `{name}` must have a `self` receiver; \
+                 associated functions cannot be exposed as contract methods"
+            ),
+        ));
+    };
+
+    // Check that self is borrowed, not consumed
+    if receiver.reference.is_none() {
+        return Err(syn::Error::new_spanned(
+            receiver,
+            format!(
+                "public method `{name}` cannot consume `self`; \
+                 use `&self` or `&mut self` instead"
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Validate all public methods in an impl block.
+fn validate_impl_block_methods(impl_block: &ItemImpl) -> Result<(), syn::Error> {
+    for item in &impl_block.items {
+        if let ImplItem::Fn(method) = item
+            && matches!(method.vis, Visibility::Public(_))
+        {
+            validate_public_method(method)?;
+        }
+    }
+    Ok(())
+}
+
 /// Validate the module and extract contract data.
 ///
 /// Returns an error if validation fails.
@@ -645,6 +722,11 @@ fn validate_and_extract<'a>(
         ));
     }
 
+    // Validate all public methods in impl blocks
+    for impl_block in &impl_blocks {
+        validate_impl_block_methods(impl_block)?;
+    }
+
     Ok(ContractData {
         imports,
         contract_name,
@@ -666,6 +748,10 @@ fn validate_and_extract<'a>(
 /// - The module contains multiple `pub struct` declarations
 /// - The module contains no `pub struct`
 /// - The module contains no impl block for the contract struct
+/// - A public method has no `self` receiver (associated functions)
+/// - A public method has generic type parameters
+/// - A public method is async
+/// - A public method consumes `self` instead of borrowing it
 #[proc_macro_attribute]
 pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let module = parse_macro_input!(item as ItemMod);
@@ -1012,5 +1098,57 @@ mod tests {
         });
 
         assert_eq!(expected, output);
+    }
+
+    #[test]
+    fn test_validate_method_valid_ref_self() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn get_value(&self) -> u64 { 0 }
+        };
+        assert!(validate_public_method(&method).is_ok());
+    }
+
+    #[test]
+    fn test_validate_method_valid_mut_self() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn set_value(&mut self, value: u64) { }
+        };
+        assert!(validate_public_method(&method).is_ok());
+    }
+
+    #[test]
+    fn test_validate_method_no_self() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn new() -> Self { Self }
+        };
+        let err = validate_public_method(&method).unwrap_err();
+        assert!(err.to_string().contains("must have a `self` receiver"));
+    }
+
+    #[test]
+    fn test_validate_method_consuming_self() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn destroy(self) { }
+        };
+        let err = validate_public_method(&method).unwrap_err();
+        assert!(err.to_string().contains("cannot consume `self`"));
+    }
+
+    #[test]
+    fn test_validate_method_generic() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn process<T>(&self, value: T) -> T { value }
+        };
+        let err = validate_public_method(&method).unwrap_err();
+        assert!(err.to_string().contains("cannot have generic parameters"));
+    }
+
+    #[test]
+    fn test_validate_method_async() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub async fn fetch_data(&self) -> u64 { 0 }
+        };
+        let err = validate_public_method(&method).unwrap_err();
+        assert!(err.to_string().contains("cannot be async"));
     }
 }
