@@ -41,9 +41,9 @@ use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, Attribute, Expr, ExprCall, ExprLit, ExprPath, FnArg, ImplItem,
-    ImplItemFn, Item, ItemImpl, ItemMod, ItemUse, Lit, Pat, ReturnType, Type, UseTree,
-    Visibility, visit::Visit,
+    Attribute, Expr, ExprCall, ExprLit, ExprPath, FnArg, ImplItem, ImplItemFn, Item, ItemImpl,
+    ItemMod, ItemUse, Lit, Pat, ReturnType, Type, UseTree, Visibility, parse_macro_input,
+    visit::Visit,
 };
 
 /// Information about an imported type.
@@ -104,7 +104,11 @@ impl<'ast> Visit<'ast> for EmitVisitor {
 
             // Match abi::emit or just emit
             let is_emit = matches!(
-                segments.iter().map(String::as_str).collect::<Vec<_>>().as_slice(),
+                segments
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
                 ["abi", "emit"] | ["emit"]
             );
 
@@ -132,7 +136,9 @@ impl<'ast> Visit<'ast> for EmitVisitor {
 fn extract_topic_from_expr(expr: &Expr) -> Option<String> {
     match expr {
         // String literal: "topic_name"
-        Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => Some(s.value()),
+        Expr::Lit(ExprLit {
+            lit: Lit::Str(s), ..
+        }) => Some(s.value()),
         // Path expression: Type::TOPIC or module::Type::TOPIC
         Expr::Path(path) => {
             // Convert the path to a string representation
@@ -331,15 +337,14 @@ fn extract_parameters(method: &ImplItemFn) -> Vec<ParameterInfo> {
                 };
 
                 // Check if the type is a reference and extract inner type
-                let (ty, is_ref, is_mut_ref) =
-                    if let Type::Reference(type_ref) = &*pat_type.ty {
-                        let inner = &type_ref.elem;
-                        let is_mut = type_ref.mutability.is_some();
-                        (quote! { #inner }, true, is_mut)
-                    } else {
-                        let t = &pat_type.ty;
-                        (quote! { #t }, false, false)
-                    };
+                let (ty, is_ref, is_mut_ref) = if let Type::Reference(type_ref) = &*pat_type.ty {
+                    let inner = &type_ref.elem;
+                    let is_mut = type_ref.mutability.is_some();
+                    (quote! { #inner }, true, is_mut)
+                } else {
+                    let t = &pat_type.ty;
+                    (quote! { #t }, false, false)
+                };
 
                 Some(ParameterInfo {
                     name,
@@ -361,7 +366,9 @@ fn extract_doc_comment(attrs: &[Attribute]) -> Option<String> {
         .filter_map(|attr| {
             if attr.path().is_ident("doc")
                 && let syn::Meta::NameValue(meta) = &attr.meta
-                && let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = &meta.value
+                && let Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) = &meta.value
             {
                 return Some(s.value().trim().to_string());
             }
@@ -432,7 +439,11 @@ fn extract_emit_calls(impl_block: &ItemImpl) -> Vec<EventInfo> {
 
     // Deduplicate events by topic (keep first occurrence)
     let mut seen = std::collections::HashSet::new();
-    visitor.events.into_iter().filter(|e| seen.insert(e.topic.clone())).collect()
+    visitor
+        .events
+        .into_iter()
+        .filter(|e| seen.insert(e.topic.clone()))
+        .collect()
 }
 
 /// Generate the schema constant.
@@ -594,7 +605,9 @@ fn generate_extern_wrappers(functions: &[FunctionInfo]) -> TokenStream2 {
 fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
     for item in &mut impl_block.items {
         if let ImplItem::Fn(method) = item {
-            method.attrs.retain(|attr| !attr.path().is_ident("contract"));
+            method
+                .attrs
+                .retain(|attr| !attr.path().is_ident("contract"));
         }
     }
     impl_block
@@ -611,18 +624,19 @@ struct ContractData<'a> {
 ///
 /// Returns an error if the method:
 /// - Has no `self` receiver (associated function)
-/// - Has generic type parameters
+/// - Has generic type or const parameters
 /// - Is async
 /// - Consumes `self` (not `&self` or `&mut self`)
+/// - Uses `impl Trait` in parameters or return type
 fn validate_public_method(method: &ImplItemFn) -> Result<(), syn::Error> {
     let name = &method.sig.ident;
 
-    // Check for generic type parameters
+    // Check for generic type or const parameters
     if !method.sig.generics.params.is_empty() {
         return Err(syn::Error::new_spanned(
             &method.sig.generics,
             format!(
-                "public method `{name}` cannot have generic parameters; \
+                "public method `{name}` cannot have generic or const parameters; \
                  extern \"C\" wrappers require concrete types"
             ),
         ));
@@ -635,6 +649,34 @@ fn validate_public_method(method: &ImplItemFn) -> Result<(), syn::Error> {
             format!(
                 "public method `{name}` cannot be async; \
                  WASM contracts do not support async execution"
+            ),
+        ));
+    }
+
+    // Check for impl Trait in parameters
+    for arg in &method.sig.inputs {
+        if let FnArg::Typed(pat_type) = arg
+            && let Type::ImplTrait(_) = &*pat_type.ty
+        {
+            return Err(syn::Error::new_spanned(
+                &pat_type.ty,
+                format!(
+                    "public method `{name}` cannot use `impl Trait` in parameters; \
+                     extern \"C\" wrappers require concrete types"
+                ),
+            ));
+        }
+    }
+
+    // Check for impl Trait in return type
+    if let ReturnType::Type(_, ty) = &method.sig.output
+        && let Type::ImplTrait(_) = &**ty
+    {
+        return Err(syn::Error::new_spanned(
+            ty,
+            format!(
+                "public method `{name}` cannot use `impl Trait` as return type; \
+                 extern \"C\" wrappers require concrete types"
             ),
         ));
     }
@@ -810,9 +852,10 @@ fn validate_and_extract<'a>(
 /// - The module contains no `pub struct`
 /// - The module contains no impl block for the contract struct
 /// - A public method has no `self` receiver (associated functions)
-/// - A public method has generic type parameters
+/// - A public method has generic type or const parameters
 /// - A public method is async
 /// - A public method consumes `self` instead of borrowing it
+/// - A public method uses `impl Trait` in parameters or return type
 #[proc_macro_attribute]
 pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let module = parse_macro_input!(item as ItemMod);
@@ -847,7 +890,10 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // Deduplicate events by topic
     let mut seen = std::collections::HashSet::new();
-    let events: Vec<_> = events.into_iter().filter(|e| seen.insert(e.topic.clone())).collect();
+    let events: Vec<_> = events
+        .into_iter()
+        .filter(|e| seen.insert(e.topic.clone()))
+        .collect();
 
     // Generate schema
     let schema = generate_schema(&contract_name, &imports, &functions, &events);
@@ -912,7 +958,10 @@ mod tests {
         let extraction = extract_imports_from_use(&use_stmt);
         assert_eq!(extraction.imports.len(), 1);
         assert_eq!(extraction.imports[0].name, "SetU64");
-        assert_eq!(extraction.imports[0].path, "evm_core::standard_bridge::SetU64");
+        assert_eq!(
+            extraction.imports[0].path,
+            "evm_core::standard_bridge::SetU64"
+        );
         assert!(!extraction.has_glob);
         assert!(!extraction.has_relative);
     }
@@ -945,7 +994,11 @@ mod tests {
         assert!(names.contains(&"Deposit"));
         assert!(names.contains(&"EVMAddress"));
 
-        let set_u64 = extraction.imports.iter().find(|i| i.name == "SetU64").unwrap();
+        let set_u64 = extraction
+            .imports
+            .iter()
+            .find(|i| i.name == "SetU64")
+            .unwrap();
         assert_eq!(set_u64.path, "evm_core::standard_bridge::SetU64");
     }
 
@@ -1212,7 +1265,10 @@ mod tests {
             pub fn process<T>(&self, value: T) -> T { value }
         };
         let err = validate_public_method(&method).unwrap_err();
-        assert!(err.to_string().contains("cannot have generic parameters"));
+        assert!(
+            err.to_string()
+                .contains("cannot have generic or const parameters")
+        );
     }
 
     #[test]
@@ -1369,5 +1425,41 @@ mod tests {
         assert_eq!(normalize_tokens(params[0].ty.clone()), "Data");
         assert!(params[0].is_ref);
         assert!(params[0].is_mut_ref);
+    }
+
+    #[test]
+    fn test_validate_method_const_generic() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn process<const N: usize>(&self) -> [u8; N] { [0; N] }
+        };
+        let err = validate_public_method(&method).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("cannot have generic or const parameters")
+        );
+    }
+
+    #[test]
+    fn test_validate_method_impl_trait_param() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn process(&self, x: impl Display) {}
+        };
+        let err = validate_public_method(&method).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("cannot use `impl Trait` in parameters")
+        );
+    }
+
+    #[test]
+    fn test_validate_method_impl_trait_return() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn iter(&self) -> impl Iterator<Item = u64> { std::iter::empty() }
+        };
+        let err = validate_public_method(&method).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("cannot use `impl Trait` as return type")
+        );
     }
 }
