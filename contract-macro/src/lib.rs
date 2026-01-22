@@ -4,6 +4,8 @@
 //
 // Copyright (c) DUSK NETWORK. All rights reserved.
 
+#![feature(let_chains)]
+
 //! Procedural macro for the `#[contract]` attribute.
 //!
 //! This macro is applied to a module containing a contract struct and its
@@ -77,6 +79,12 @@ struct FunctionInfo {
     is_custom: bool,
     /// Whether the method returns a reference (requires `.clone()` in wrapper).
     returns_ref: bool,
+    /// Whether this method has a `self` receiver.
+    has_self: bool,
+    /// Whether this method uses `&mut self` (vs `&self`).
+    is_mut: bool,
+    /// For trait methods with empty bodies: the trait name to call the default impl.
+    trait_name: Option<String>,
 }
 
 /// Information about an event extracted from `abi::emit()` calls.
@@ -281,7 +289,8 @@ fn extract_imports_from_tree(tree: &UseTree, prefix: &str) -> ImportExtraction {
 /// Extract methods from a trait impl block based on the expose list.
 ///
 /// Only methods whose names appear in the `expose_list` will be extracted.
-/// Methods are validated the same way as inherent public methods.
+/// Methods with empty bodies `{}` are treated as "use default implementation" -
+/// the macro will generate wrappers that call the trait method directly.
 fn extract_trait_methods(
     trait_impl: &TraitImplInfo,
 ) -> Result<Vec<FunctionInfo>, syn::Error> {
@@ -296,12 +305,16 @@ fn extract_trait_methods(
                 continue;
             }
 
-            // Validate the method (same rules as public methods)
-            validate_trait_method(method, &trait_impl.trait_name)?;
+            // Check if this is an empty-body method (signals "use default impl")
+            let is_default_impl = has_empty_body(method);
+
+            // Validate the method (allow associated functions for trait methods)
+            validate_trait_method(method, &trait_impl.trait_name, is_default_impl)?;
 
             let name = method.sig.ident.clone();
             let doc = extract_doc_comment(&method.attrs);
             let is_custom = has_custom_attribute(&method.attrs);
+            let (has_self, is_mut) = extract_self_info(method);
 
             // Extract parameters (name and type)
             let params = extract_parameters(method);
@@ -312,6 +325,13 @@ fn extract_trait_methods(
             // Extract output type (dereferenced if it's a reference)
             let (output_type, returns_ref) = extract_output_type(&method.sig.output);
 
+            // For empty-body methods, store the trait name to generate correct wrapper
+            let trait_name = if is_default_impl {
+                Some(trait_impl.trait_name.clone())
+            } else {
+                None
+            };
+
             functions.push(FunctionInfo {
                 name,
                 doc,
@@ -320,6 +340,9 @@ fn extract_trait_methods(
                 output_type,
                 is_custom,
                 returns_ref,
+                has_self,
+                is_mut,
+                trait_name,
             });
         }
     }
@@ -331,7 +354,7 @@ fn extract_trait_methods(
                 trait_impl.impl_block,
                 format!(
                     "method `{method_name}` listed in expose but not found in `impl {} for ...`; \
-                     if it's a default implementation, add an override that calls the default",
+                     add a stub with empty body `{{}}` to expose default implementations",
                     trait_impl.trait_name
                 ),
             ));
@@ -344,7 +367,12 @@ fn extract_trait_methods(
 /// Validate a method from a trait impl block.
 ///
 /// Similar to `validate_public_method` but with trait-specific error messages.
-fn validate_trait_method(method: &ImplItemFn, trait_name: &str) -> Result<(), syn::Error> {
+/// For default implementations (empty body), associated functions (no self) are allowed.
+fn validate_trait_method(
+    method: &ImplItemFn,
+    trait_name: &str,
+    is_default_impl: bool,
+) -> Result<(), syn::Error> {
     let name = &method.sig.ident;
 
     // Check for generic type or const parameters
@@ -406,23 +434,25 @@ fn validate_trait_method(method: &ImplItemFn, trait_name: &str) -> Result<(), sy
         }
     });
 
-    let Some(receiver) = receiver else {
+    // Associated functions (no self) are allowed for default implementations
+    if let Some(receiver) = receiver {
+        // Check that self is borrowed, not consumed
+        if receiver.reference.is_none() {
+            return Err(syn::Error::new_spanned(
+                receiver,
+                format!(
+                    "trait method `{trait_name}::{name}` cannot consume `self`; \
+                     use `&self` or `&mut self` instead"
+                ),
+            ));
+        }
+    } else if !is_default_impl {
+        // Non-default implementations must have self
         return Err(syn::Error::new_spanned(
             &method.sig,
             format!(
                 "trait method `{trait_name}::{name}` must have a `self` receiver; \
-                 associated functions cannot be exposed as contract methods"
-            ),
-        ));
-    };
-
-    // Check that self is borrowed, not consumed
-    if receiver.reference.is_none() {
-        return Err(syn::Error::new_spanned(
-            receiver,
-            format!(
-                "trait method `{trait_name}::{name}` cannot consume `self`; \
-                 use `&self` or `&mut self` instead"
+                 for associated functions, use an empty body `{{}}` to expose the default impl"
             ),
         ));
     }
@@ -452,6 +482,7 @@ fn extract_public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
             let name = method.sig.ident.clone();
             let doc = extract_doc_comment(&method.attrs);
             let is_custom = has_custom_attribute(&method.attrs);
+            let (has_self, is_mut) = extract_self_info(method);
 
             // Extract parameters (name and type)
             let params = extract_parameters(method);
@@ -470,6 +501,9 @@ fn extract_public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
                 output_type,
                 is_custom,
                 returns_ref,
+                has_self,
+                is_mut,
+                trait_name: None, // Not a trait method
             });
         }
     }
@@ -540,6 +574,28 @@ fn extract_doc_comment(attrs: &[Attribute]) -> Option<String> {
         None
     } else {
         Some(docs.join(" "))
+    }
+}
+
+/// Check if a method body is empty (just `{}`).
+///
+/// Empty bodies in trait impls signal "use the default implementation,
+/// I'm just providing the signature for wrapper generation".
+fn has_empty_body(method: &ImplItemFn) -> bool {
+    method.block.stmts.is_empty()
+}
+
+/// Extract self receiver info from a method signature.
+///
+/// Returns `(has_self, is_mut)` where:
+/// - `has_self` is true if the method has any form of `self` receiver
+/// - `is_mut` is true if the receiver is `&mut self`
+fn extract_self_info(method: &ImplItemFn) -> (bool, bool) {
+    if let Some(FnArg::Receiver(receiver)) = method.sig.inputs.first() {
+        let is_mut = receiver.mutability.is_some();
+        (true, is_mut)
+    } else {
+        (false, false)
     }
 }
 
@@ -774,7 +830,12 @@ fn generate_state_static(contract_ident: &Ident) -> TokenStream2 {
 /// Each wrapper deserializes input, calls the method on STATE, and serializes output.
 /// - For methods that return references, the wrapper clones the result before serialization.
 /// - For parameters that are references, the wrapper receives the owned value and passes a reference.
-fn generate_extern_wrappers(functions: &[FunctionInfo]) -> TokenStream2 {
+/// - For trait methods with default implementations, calls the trait method via fully-qualified syntax.
+/// - For associated functions (no self), calls the function on the contract type.
+fn generate_extern_wrappers(
+    functions: &[FunctionInfo],
+    contract_ident: &Ident,
+) -> TokenStream2 {
     let wrappers: Vec<_> = functions
         .iter()
         .map(|f| {
@@ -806,11 +867,48 @@ fn generate_extern_wrappers(functions: &[FunctionInfo]) -> TokenStream2 {
                 }
             };
 
-            // If the method returns a reference, clone the result for serialization
-            let method_call = if f.returns_ref {
-                quote! { STATE.#fn_name(#method_args).clone() }
-            } else {
-                quote! { STATE.#fn_name(#method_args) }
+            // Generate the method call based on whether it's a regular method,
+            // trait method, or associated function
+            let method_call = match (&f.trait_name, f.has_self) {
+                // Trait method with default impl (empty body) - call via trait
+                (Some(trait_name), true) => {
+                    let trait_ident = format_ident!("{}", trait_name);
+                    let state_ref = if f.is_mut {
+                        quote! { &mut STATE }
+                    } else {
+                        quote! { &STATE }
+                    };
+                    if f.returns_ref {
+                        quote! { #trait_ident::#fn_name(#state_ref, #method_args).clone() }
+                    } else {
+                        quote! { #trait_ident::#fn_name(#state_ref, #method_args) }
+                    }
+                }
+                // Trait associated function with default impl (no self)
+                (Some(trait_name), false) => {
+                    let trait_ident = format_ident!("{}", trait_name);
+                    if f.returns_ref {
+                        quote! { <#contract_ident as #trait_ident>::#fn_name(#method_args).clone() }
+                    } else {
+                        quote! { <#contract_ident as #trait_ident>::#fn_name(#method_args) }
+                    }
+                }
+                // Regular method - call on STATE
+                (None, true) => {
+                    if f.returns_ref {
+                        quote! { STATE.#fn_name(#method_args).clone() }
+                    } else {
+                        quote! { STATE.#fn_name(#method_args) }
+                    }
+                }
+                // Associated function (no self, no trait) - shouldn't happen but handle it
+                (None, false) => {
+                    if f.returns_ref {
+                        quote! { #contract_ident::#fn_name(#method_args).clone() }
+                    } else {
+                        quote! { #contract_ident::#fn_name(#method_args) }
+                    }
+                }
             };
 
             quote! {
@@ -833,7 +931,11 @@ fn generate_extern_wrappers(functions: &[FunctionInfo]) -> TokenStream2 {
 }
 
 /// Strip #[contract(...)] attributes from the impl block and its methods.
+/// For trait impl blocks, also removes empty-body methods (they're just signature stubs
+/// for wrapper generation and should use the trait's default implementation).
 fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
+    let is_trait_impl = impl_block.trait_.is_some();
+
     // Strip from the impl block itself (e.g., #[contract(expose = [...])])
     impl_block
         .attrs
@@ -847,6 +949,18 @@ fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
                 .retain(|attr| !attr.path().is_ident("contract"));
         }
     }
+
+    // For trait impls, remove empty-body methods so they use the default implementation
+    if is_trait_impl {
+        impl_block.items.retain(|item| {
+            if let ImplItem::Fn(method) = item {
+                !method.block.stmts.is_empty()
+            } else {
+                true
+            }
+        });
+    }
+
     impl_block
 }
 
@@ -1364,7 +1478,7 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let state_static = generate_state_static(&contract_ident);
 
     // Generate extern "C" wrappers
-    let externs = generate_extern_wrappers(&functions);
+    let externs = generate_extern_wrappers(&functions, &contract_ident);
 
     // Rebuild the module with stripped contract attributes on methods
     let mod_vis = &module.vis;
@@ -1544,6 +1658,7 @@ mod tests {
 
     #[test]
     fn test_extern_wrapper_no_params() {
+        let contract_ident = format_ident!("MyContract");
         let functions = vec![FunctionInfo {
             name: format_ident!("is_paused"),
             doc: Some("Returns pause state.".to_string()),
@@ -1552,9 +1667,12 @@ mod tests {
             output_type: quote! { bool },
             is_custom: false,
             returns_ref: false,
+            has_self: true,
+            is_mut: false,
+            trait_name: None,
         }];
 
-        let output = normalize_tokens(generate_extern_wrappers(&functions));
+        let output = normalize_tokens(generate_extern_wrappers(&functions, &contract_ident));
 
         let expected = normalize_tokens(quote! {
             #[cfg(target_family = "wasm")]
@@ -1573,6 +1691,7 @@ mod tests {
 
     #[test]
     fn test_extern_wrapper_single_param() {
+        let contract_ident = format_ident!("MyContract");
         let functions = vec![FunctionInfo {
             name: format_ident!("init"),
             doc: Some("Initialize.".to_string()),
@@ -1586,9 +1705,12 @@ mod tests {
             output_type: quote! { () },
             is_custom: false,
             returns_ref: false,
+            has_self: true,
+            is_mut: true,
+            trait_name: None,
         }];
 
-        let output = normalize_tokens(generate_extern_wrappers(&functions));
+        let output = normalize_tokens(generate_extern_wrappers(&functions, &contract_ident));
 
         let expected = normalize_tokens(quote! {
             #[cfg(target_family = "wasm")]
@@ -1607,6 +1729,7 @@ mod tests {
 
     #[test]
     fn test_extern_wrapper_multiple_params() {
+        let contract_ident = format_ident!("MyContract");
         let functions = vec![FunctionInfo {
             name: format_ident!("transfer"),
             doc: Some("Transfer funds.".to_string()),
@@ -1628,9 +1751,12 @@ mod tests {
             output_type: quote! { () },
             is_custom: false,
             returns_ref: false,
+            has_self: true,
+            is_mut: true,
+            trait_name: None,
         }];
 
-        let output = normalize_tokens(generate_extern_wrappers(&functions));
+        let output = normalize_tokens(generate_extern_wrappers(&functions, &contract_ident));
 
         let expected = normalize_tokens(quote! {
             #[cfg(target_family = "wasm")]
@@ -1649,6 +1775,7 @@ mod tests {
 
     #[test]
     fn test_extern_wrappers_multiple_functions() {
+        let contract_ident = format_ident!("MyContract");
         let functions = vec![
             FunctionInfo {
                 name: format_ident!("pause"),
@@ -1658,6 +1785,9 @@ mod tests {
                 output_type: quote! { () },
                 is_custom: false,
                 returns_ref: false,
+                has_self: true,
+                is_mut: true,
+                trait_name: None,
             },
             FunctionInfo {
                 name: format_ident!("unpause"),
@@ -1667,10 +1797,13 @@ mod tests {
                 output_type: quote! { () },
                 is_custom: false,
                 returns_ref: false,
+                has_self: true,
+                is_mut: true,
+                trait_name: None,
             },
         ];
 
-        let output = normalize_tokens(generate_extern_wrappers(&functions));
+        let output = normalize_tokens(generate_extern_wrappers(&functions, &contract_ident));
 
         let expected = normalize_tokens(quote! {
             #[cfg(target_family = "wasm")]
@@ -1773,6 +1906,7 @@ mod tests {
 
     #[test]
     fn test_extern_wrapper_returns_ref() {
+        let contract_ident = format_ident!("MyContract");
         let functions = vec![FunctionInfo {
             name: format_ident!("get_data"),
             doc: None,
@@ -1781,9 +1915,12 @@ mod tests {
             output_type: quote! { LargeStruct },
             is_custom: false,
             returns_ref: true,
+            has_self: true,
+            is_mut: false,
+            trait_name: None,
         }];
 
-        let output = normalize_tokens(generate_extern_wrappers(&functions));
+        let output = normalize_tokens(generate_extern_wrappers(&functions, &contract_ident));
 
         let expected = normalize_tokens(quote! {
             #[cfg(target_family = "wasm")]
@@ -1802,6 +1939,7 @@ mod tests {
 
     #[test]
     fn test_extern_wrapper_ref_param() {
+        let contract_ident = format_ident!("MyContract");
         let functions = vec![FunctionInfo {
             name: format_ident!("process"),
             doc: None,
@@ -1815,9 +1953,12 @@ mod tests {
             output_type: quote! { () },
             is_custom: false,
             returns_ref: false,
+            has_self: true,
+            is_mut: true,
+            trait_name: None,
         }];
 
-        let output = normalize_tokens(generate_extern_wrappers(&functions));
+        let output = normalize_tokens(generate_extern_wrappers(&functions, &contract_ident));
 
         let expected = normalize_tokens(quote! {
             #[cfg(target_family = "wasm")]
@@ -1836,6 +1977,7 @@ mod tests {
 
     #[test]
     fn test_extern_wrapper_mut_ref_param() {
+        let contract_ident = format_ident!("MyContract");
         let functions = vec![FunctionInfo {
             name: format_ident!("modify"),
             doc: None,
@@ -1849,9 +1991,12 @@ mod tests {
             output_type: quote! { () },
             is_custom: false,
             returns_ref: false,
+            has_self: true,
+            is_mut: true,
+            trait_name: None,
         }];
 
-        let output = normalize_tokens(generate_extern_wrappers(&functions));
+        let output = normalize_tokens(generate_extern_wrappers(&functions, &contract_ident));
 
         let expected = normalize_tokens(quote! {
             #[cfg(target_family = "wasm")]
@@ -2283,7 +2428,7 @@ mod tests {
         let method: ImplItemFn = syn::parse_quote! {
             fn owner(&self) -> Option<Address> { self.owner }
         };
-        assert!(validate_trait_method(&method, "OwnableTrait").is_ok());
+        assert!(validate_trait_method(&method, "OwnableTrait", false).is_ok());
     }
 
     #[test]
@@ -2291,17 +2436,27 @@ mod tests {
         let method: ImplItemFn = syn::parse_quote! {
             fn transfer(&mut self, to: Address) {}
         };
-        assert!(validate_trait_method(&method, "OwnableTrait").is_ok());
+        assert!(validate_trait_method(&method, "OwnableTrait", false).is_ok());
     }
 
     #[test]
-    fn test_validate_trait_method_no_self() {
+    fn test_validate_trait_method_no_self_not_default() {
+        // Non-default impl methods without self should fail
         let method: ImplItemFn = syn::parse_quote! {
             fn version() -> String { "1.0".to_string() }
         };
-        let err = validate_trait_method(&method, "ISemver").unwrap_err();
+        let err = validate_trait_method(&method, "ISemver", false).unwrap_err();
         assert!(err.to_string().contains("must have a `self` receiver"));
         assert!(err.to_string().contains("ISemver::version"));
+    }
+
+    #[test]
+    fn test_validate_trait_method_no_self_default_impl() {
+        // Default impl methods (empty body) without self should pass
+        let method: ImplItemFn = syn::parse_quote! {
+            fn version() -> String {}
+        };
+        assert!(validate_trait_method(&method, "ISemver", true).is_ok());
     }
 
     #[test]
@@ -2309,7 +2464,7 @@ mod tests {
         let method: ImplItemFn = syn::parse_quote! {
             fn destroy(self) {}
         };
-        let err = validate_trait_method(&method, "Destructible").unwrap_err();
+        let err = validate_trait_method(&method, "Destructible", false).unwrap_err();
         assert!(err.to_string().contains("cannot consume `self`"));
     }
 
@@ -2318,7 +2473,7 @@ mod tests {
         let method: ImplItemFn = syn::parse_quote! {
             fn process<T>(&self, value: T) {}
         };
-        let err = validate_trait_method(&method, "Processor").unwrap_err();
+        let err = validate_trait_method(&method, "Processor", false).unwrap_err();
         assert!(
             err.to_string()
                 .contains("cannot have generic or const parameters")
