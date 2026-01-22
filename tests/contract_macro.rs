@@ -42,6 +42,16 @@ mod test_bridge {
     }
 
     impl TestBridge {
+        /// Creates a new empty instance of the test bridge contract state.
+        pub const fn new() -> Self {
+            Self {
+                owner: None,
+                is_paused: false,
+                finalization_period: 100,
+                other_bridge: EVMAddress([0u8; 20]),
+            }
+        }
+
         /// Initializes the contract with an owner.
         pub fn init(&mut self, owner: DSAddress) {
             self.owner = Some(owner);

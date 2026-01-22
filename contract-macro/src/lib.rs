@@ -30,6 +30,9 @@
 //! }
 //! ```
 
+// NOTE: next step:
+// - if there is init method, make sure it's fn sig is correct
+
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(unused_must_use)]
@@ -279,6 +282,9 @@ fn extract_imports_from_tree(tree: &UseTree, prefix: &str) -> ImportExtraction {
 }
 
 /// Extract public methods from an impl block.
+///
+/// Note: The `new` method is skipped because it's a special constructor
+/// used only for initializing the static STATE variable.
 fn extract_public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
     let mut functions = Vec::new();
 
@@ -286,6 +292,11 @@ fn extract_public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
         if let ImplItem::Fn(method) = item {
             // Only process public methods
             if !matches!(method.vis, Visibility::Public(_)) {
+                continue;
+            }
+
+            // Skip the `new` constructor - it's not exported
+            if method.sig.ident == "new" {
                 continue;
             }
 
@@ -538,6 +549,20 @@ fn generate_arg_expr(param: &ParameterInfo) -> TokenStream2 {
     }
 }
 
+/// Generate the static `STATE` variable declaration.
+///
+/// This creates a mutable static variable initialized via the contract's `new()` constructor:
+/// ```ignore
+/// static mut STATE: ContractName = ContractName::new();
+/// ```
+fn generate_state_static(contract_ident: &Ident) -> TokenStream2 {
+    quote! {
+        /// Static contract state initialized via `new()`.
+        #[cfg(target_family = "wasm")]
+        static mut STATE: #contract_ident = #contract_ident::new();
+    }
+}
+
 /// Generate extern "C" wrapper functions for all public methods.
 ///
 /// Each wrapper deserializes input, calls the method on STATE, and serializes output.
@@ -617,6 +642,7 @@ fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
 struct ContractData<'a> {
     imports: Vec<ImportInfo>,
     contract_name: String,
+    contract_ident: Ident,
     impl_blocks: Vec<&'a ItemImpl>,
 }
 
@@ -715,14 +741,100 @@ fn validate_public_method(method: &ImplItemFn) -> Result<(), syn::Error> {
 }
 
 /// Validate all public methods in an impl block.
+///
+/// Note: The `new` method is skipped because it's a special constructor
+/// that is validated separately by `validate_new_constructor` and is not
+/// exported as an extern function.
 fn validate_impl_block_methods(impl_block: &ItemImpl) -> Result<(), syn::Error> {
     for item in &impl_block.items {
         if let ImplItem::Fn(method) = item
             && matches!(method.vis, Visibility::Public(_))
+            && method.sig.ident != "new"
         {
             validate_public_method(method)?;
         }
     }
+    Ok(())
+}
+
+/// Validate that the contract struct has a `const fn new() -> Self` method.
+///
+/// This method is required to initialize the static `STATE` variable.
+/// It must be:
+/// - Named `new`
+/// - Marked `const`
+/// - Have no parameters
+/// - Return `Self` (or the contract type name)
+fn validate_new_constructor(
+    contract_name: &str,
+    impl_blocks: &[&ItemImpl],
+    contract_struct: &syn::ItemStruct,
+) -> Result<(), syn::Error> {
+    // Find the `new` method in any impl block
+    let new_method = impl_blocks.iter().find_map(|impl_block| {
+        impl_block.items.iter().find_map(|item| {
+            if let ImplItem::Fn(method) = item
+                && method.sig.ident == "new"
+            {
+                Some(method)
+            } else {
+                None
+            }
+        })
+    });
+
+    let Some(new_method) = new_method else {
+        return Err(syn::Error::new_spanned(
+            contract_struct,
+            format!(
+                "#[contract] requires `{contract_name}` to have a `const fn new() -> Self` method \
+                 to initialize the static STATE variable"
+            ),
+        ));
+    };
+
+    // Must be const
+    if new_method.sig.constness.is_none() {
+        return Err(syn::Error::new_spanned(
+            &new_method.sig,
+            format!(
+                "`{contract_name}::new` must be a `const fn` to initialize the static STATE variable; \
+                 add `const` to the function signature"
+            ),
+        ));
+    }
+
+    // Must have no parameters (no self, no other args)
+    if !new_method.sig.inputs.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &new_method.sig.inputs,
+            format!(
+                "`{contract_name}::new` must have no parameters; \
+                 use `const fn new() -> Self` to create a default state"
+            ),
+        ));
+    }
+
+    // Must return Self or the contract type
+    let has_valid_return = match &new_method.sig.output {
+        ReturnType::Default => false,
+        ReturnType::Type(_, ty) => {
+            // Check for `Self`
+            if let Type::Path(type_path) = &**ty {
+                type_path.path.is_ident("Self") || type_path.path.is_ident(contract_name)
+            } else {
+                false
+            }
+        }
+    };
+
+    if !has_valid_return {
+        return Err(syn::Error::new_spanned(
+            &new_method.sig.output,
+            format!("`{contract_name}::new` must return `Self` or `{contract_name}`"),
+        ));
+    }
+
     Ok(())
 }
 
@@ -830,9 +942,13 @@ fn validate_and_extract<'a>(
         validate_impl_block_methods(impl_block)?;
     }
 
+    // Validate that the contract struct has a `const fn new() -> Self` method
+    validate_new_constructor(&contract_name, &impl_blocks, contract_struct)?;
+
     Ok(ContractData {
         imports,
         contract_name,
+        contract_ident: contract_struct.ident.clone(),
         impl_blocks,
     })
 }
@@ -876,6 +992,7 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let ContractData {
         imports,
         contract_name,
+        contract_ident,
         impl_blocks,
     } = data;
 
@@ -897,6 +1014,9 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // Generate schema
     let schema = generate_schema(&contract_name, &imports, &functions, &events);
+
+    // Generate static STATE variable
+    let state_static = generate_state_static(&contract_ident);
 
     // Generate extern "C" wrappers
     let externs = generate_extern_wrappers(&functions);
@@ -921,13 +1041,15 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect();
 
-    // Output: module with schema and externs added
+    // Output: module with schema, state, and externs added
     let output = quote! {
         #(#mod_attrs)*
         #mod_vis mod #mod_name {
             #(#new_items)*
 
             #schema
+
+            #state_static
 
             #externs
         }
@@ -1461,5 +1583,133 @@ mod tests {
             err.to_string()
                 .contains("cannot use `impl Trait` as return type")
         );
+    }
+
+    #[test]
+    fn test_validate_new_constructor_valid() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub const fn new() -> Self {
+                    Self { value: 0 }
+                }
+            }
+        };
+        let contract_struct: syn::ItemStruct = syn::parse_quote! {
+            pub struct MyContract {
+                value: u64,
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        assert!(validate_new_constructor("MyContract", &impl_blocks, &contract_struct).is_ok());
+    }
+
+    #[test]
+    fn test_validate_new_constructor_valid_returns_typename() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub const fn new() -> MyContract {
+                    MyContract { value: 0 }
+                }
+            }
+        };
+        let contract_struct: syn::ItemStruct = syn::parse_quote! {
+            pub struct MyContract {
+                value: u64,
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        assert!(validate_new_constructor("MyContract", &impl_blocks, &contract_struct).is_ok());
+    }
+
+    #[test]
+    fn test_validate_new_constructor_missing() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn get_value(&self) -> u64 { 0 }
+            }
+        };
+        let contract_struct: syn::ItemStruct = syn::parse_quote! {
+            pub struct MyContract {
+                value: u64,
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        let err =
+            validate_new_constructor("MyContract", &impl_blocks, &contract_struct).unwrap_err();
+        assert!(err.to_string().contains("const fn new() -> Self"));
+    }
+
+    #[test]
+    fn test_validate_new_constructor_not_const() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn new() -> Self {
+                    Self { value: 0 }
+                }
+            }
+        };
+        let contract_struct: syn::ItemStruct = syn::parse_quote! {
+            pub struct MyContract {
+                value: u64,
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        let err =
+            validate_new_constructor("MyContract", &impl_blocks, &contract_struct).unwrap_err();
+        assert!(err.to_string().contains("must be a `const fn`"));
+    }
+
+    #[test]
+    fn test_validate_new_constructor_has_params() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub const fn new(value: u64) -> Self {
+                    Self { value }
+                }
+            }
+        };
+        let contract_struct: syn::ItemStruct = syn::parse_quote! {
+            pub struct MyContract {
+                value: u64,
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        let err =
+            validate_new_constructor("MyContract", &impl_blocks, &contract_struct).unwrap_err();
+        assert!(err.to_string().contains("must have no parameters"));
+    }
+
+    #[test]
+    fn test_validate_new_constructor_wrong_return() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub const fn new() -> u64 {
+                    0
+                }
+            }
+        };
+        let contract_struct: syn::ItemStruct = syn::parse_quote! {
+            pub struct MyContract {
+                value: u64,
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        let err =
+            validate_new_constructor("MyContract", &impl_blocks, &contract_struct).unwrap_err();
+        assert!(err.to_string().contains("must return `Self`"));
+    }
+
+    #[test]
+    fn test_generate_state_static() {
+        let contract_ident = format_ident!("MyContract");
+        let output = normalize_tokens(generate_state_static(&contract_ident));
+
+        let expected = normalize_tokens(quote! {
+            /// Static contract state initialized via `new()`.
+            #[cfg(target_family = "wasm")]
+            static mut STATE: MyContract = MyContract::new();
+        });
+
+        assert_eq!(expected, output);
     }
 }
