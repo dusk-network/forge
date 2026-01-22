@@ -30,9 +30,6 @@
 //! }
 //! ```
 
-// NOTE: next step:
-// - if there is init method, make sure it's fn sig is correct
-
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(unused_must_use)]
@@ -838,6 +835,85 @@ fn validate_new_constructor(
     Ok(())
 }
 
+/// Validate the `init` method if present.
+///
+/// The `init` method is optional but if present, it must:
+/// - Take `&mut self` (initialization modifies state)
+/// - Return `()` (errors should panic, not return)
+fn validate_init_method(contract_name: &str, impl_blocks: &[&ItemImpl]) -> Result<(), syn::Error> {
+    // Find the `init` method in any impl block
+    let init_method = impl_blocks.iter().find_map(|impl_block| {
+        impl_block.items.iter().find_map(|item| {
+            if let ImplItem::Fn(method) = item
+                && method.sig.ident == "init"
+            {
+                Some(method)
+            } else {
+                None
+            }
+        })
+    });
+
+    // If no init method, that's fine - it's optional
+    let Some(init_method) = init_method else {
+        return Ok(());
+    };
+
+    // Check that it has a receiver
+    let receiver = init_method.sig.inputs.first().and_then(|arg| {
+        if let FnArg::Receiver(r) = arg {
+            Some(r)
+        } else {
+            None
+        }
+    });
+
+    let Some(receiver) = receiver else {
+        return Err(syn::Error::new_spanned(
+            &init_method.sig,
+            format!(
+                "`{contract_name}::init` must take `&mut self`; \
+                 initialization requires access to contract state"
+            ),
+        ));
+    };
+
+    // Must be &mut self, not &self or self
+    if receiver.reference.is_none() || receiver.mutability.is_none() {
+        return Err(syn::Error::new_spanned(
+            receiver,
+            format!(
+                "`{contract_name}::init` must take `&mut self`; \
+                 initialization needs to modify contract state"
+            ),
+        ));
+    }
+
+    // Must return () - check for default return or explicit ()
+    let returns_unit = match &init_method.sig.output {
+        ReturnType::Default => true,
+        ReturnType::Type(_, ty) => {
+            if let Type::Tuple(tuple) = &**ty {
+                tuple.elems.is_empty()
+            } else {
+                false
+            }
+        }
+    };
+
+    if !returns_unit {
+        return Err(syn::Error::new_spanned(
+            &init_method.sig.output,
+            format!(
+                "`{contract_name}::init` must return `()`; \
+                 use `panic!` or `assert!` for initialization errors"
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Validate the module and extract contract data.
 ///
 /// Returns an error if validation fails.
@@ -944,6 +1020,9 @@ fn validate_and_extract<'a>(
 
     // Validate that the contract struct has a `const fn new() -> Self` method
     validate_new_constructor(&contract_name, &impl_blocks, contract_struct)?;
+
+    // Validate the `init` method if present
+    validate_init_method(&contract_name, &impl_blocks)?;
 
     Ok(ContractData {
         imports,
@@ -1711,5 +1790,106 @@ mod tests {
         });
 
         assert_eq!(expected, output);
+    }
+
+    #[test]
+    fn test_validate_init_method_valid() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn init(&mut self, owner: Address) {
+                    self.owner = owner;
+                }
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        assert!(validate_init_method("MyContract", &impl_blocks).is_ok());
+    }
+
+    #[test]
+    fn test_validate_init_method_valid_no_params() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn init(&mut self) {
+                    self.initialized = true;
+                }
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        assert!(validate_init_method("MyContract", &impl_blocks).is_ok());
+    }
+
+    #[test]
+    fn test_validate_init_method_absent_is_ok() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn get_value(&self) -> u64 { 0 }
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        assert!(validate_init_method("MyContract", &impl_blocks).is_ok());
+    }
+
+    #[test]
+    fn test_validate_init_method_immutable_self() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn init(&self, owner: Address) {}
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        let err = validate_init_method("MyContract", &impl_blocks).unwrap_err();
+        assert!(err.to_string().contains("must take `&mut self`"));
+    }
+
+    #[test]
+    fn test_validate_init_method_no_self() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn init(owner: Address) {}
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        let err = validate_init_method("MyContract", &impl_blocks).unwrap_err();
+        assert!(err.to_string().contains("must take `&mut self`"));
+    }
+
+    #[test]
+    fn test_validate_init_method_consuming_self() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn init(self, owner: Address) {}
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        let err = validate_init_method("MyContract", &impl_blocks).unwrap_err();
+        assert!(err.to_string().contains("must take `&mut self`"));
+    }
+
+    #[test]
+    fn test_validate_init_method_returns_value() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn init(&mut self, owner: Address) -> bool {
+                    true
+                }
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        let err = validate_init_method("MyContract", &impl_blocks).unwrap_err();
+        assert!(err.to_string().contains("must return `()`"));
+    }
+
+    #[test]
+    fn test_validate_init_method_returns_result() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn init(&mut self, owner: Address) -> Result<(), Error> {
+                    Ok(())
+                }
+            }
+        };
+        let impl_blocks = vec![&impl_block];
+        let err = validate_init_method("MyContract", &impl_blocks).unwrap_err();
+        assert!(err.to_string().contains("must return `()`"));
     }
 }
