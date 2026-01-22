@@ -22,8 +22,8 @@ mod test_bridge {
     // Import actual types from evm-core (same types used by StandardBridge)
     use evm_core::standard_bridge::events;
     use evm_core::standard_bridge::{
-        Deposit, EVMAddress, PendingWithdrawal, SetEVMAddressOrOffset, SetU64,
-        WithdrawalId, WithdrawalRequest,
+        Deposit, EVMAddress, PendingWithdrawal, SetEVMAddressOrOffset, SetU64, WithdrawalId,
+        WithdrawalRequest,
     };
     use evm_core::Address as DSAddress;
 
@@ -83,7 +83,10 @@ mod test_bridge {
         pub fn set_u64(&mut self, _value: SetU64) {
             abi::emit(
                 events::U64Set::FINALIZATION_PERIOD,
-                events::U64Set { previous: 0, new: 0 },
+                events::U64Set {
+                    previous: 0,
+                    new: 0,
+                },
             );
         }
 
@@ -193,7 +196,10 @@ fn test_imports_extracted() {
 
 #[test]
 fn test_public_functions_extracted() {
-    let names: Vec<_> = test_bridge::CONTRACT_SCHEMA.iter_functions().map(|f| f.name).collect();
+    let names: Vec<_> = test_bridge::CONTRACT_SCHEMA
+        .iter_functions()
+        .map(|f| f.name)
+        .collect();
 
     // All public functions should be present
     assert!(names.contains(&"init"));
@@ -220,11 +226,15 @@ fn test_function_signatures() {
     assert_eq!(init.doc, "Initializes the contract with an owner.");
     assert!(init.input.contains("DSAddress"));
 
-    let is_paused = test_bridge::CONTRACT_SCHEMA.get_function("is_paused").unwrap();
+    let is_paused = test_bridge::CONTRACT_SCHEMA
+        .get_function("is_paused")
+        .unwrap();
     assert!(is_paused.input.contains("()"));
     assert!(is_paused.output.contains("bool"));
 
-    let pending = test_bridge::CONTRACT_SCHEMA.get_function("pending_withdrawal").unwrap();
+    let pending = test_bridge::CONTRACT_SCHEMA
+        .get_function("pending_withdrawal")
+        .unwrap();
     assert!(pending.input.contains("WithdrawalId"));
     assert!(pending.output.contains("Option"));
     assert!(pending.output.contains("PendingWithdrawal"));
@@ -232,7 +242,10 @@ fn test_function_signatures() {
 
 #[test]
 fn test_events_extracted() {
-    let topics: Vec<_> = test_bridge::CONTRACT_SCHEMA.iter_events().map(|e| e.topic).collect();
+    let topics: Vec<_> = test_bridge::CONTRACT_SCHEMA
+        .iter_events()
+        .map(|e| e.topic)
+        .collect();
 
     // Event topics are stored as path expressions
     assert!(topics.contains(&"events::PauseToggled::PAUSED"));
@@ -247,13 +260,19 @@ fn test_events_extracted() {
 
 #[test]
 fn test_event_data_types() {
-    let paused = test_bridge::CONTRACT_SCHEMA.get_event("events::PauseToggled::PAUSED").unwrap();
+    let paused = test_bridge::CONTRACT_SCHEMA
+        .get_event("events::PauseToggled::PAUSED")
+        .unwrap();
     assert!(paused.data.contains("PauseToggled"));
 
-    let deposited = test_bridge::CONTRACT_SCHEMA.get_event("events::TransactionDeposited::TOPIC").unwrap();
+    let deposited = test_bridge::CONTRACT_SCHEMA
+        .get_event("events::TransactionDeposited::TOPIC")
+        .unwrap();
     assert!(deposited.data.contains("TransactionDeposited"));
 
-    let finalized = test_bridge::CONTRACT_SCHEMA.get_event("events::BridgeFinalized::TOPIC").unwrap();
+    let finalized = test_bridge::CONTRACT_SCHEMA
+        .get_event("events::BridgeFinalized::TOPIC")
+        .unwrap();
     assert!(finalized.data.contains("BridgeFinalized"));
 }
 

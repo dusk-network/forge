@@ -111,10 +111,7 @@ pub(crate) fn state_static(contract_ident: &Ident) -> TokenStream2 {
 /// - For parameters that are references, the wrapper receives the owned value and passes a reference.
 /// - For trait methods with default implementations, calls the trait method via fully-qualified syntax.
 /// - For associated functions (no self), calls the function on the contract type.
-pub(crate) fn extern_wrappers(
-    functions: &[FunctionInfo],
-    contract_ident: &Ident,
-) -> TokenStream2 {
+pub(crate) fn extern_wrappers(functions: &[FunctionInfo], contract_ident: &Ident) -> TokenStream2 {
     let wrappers: Vec<_> = functions
         .iter()
         .map(|f| {

@@ -205,7 +205,10 @@ pub(crate) fn new_constructor(
 /// The `init` method is optional but if present, it must:
 /// - Take `&mut self` (initialization modifies state)
 /// - Return `()` (errors should panic, not return)
-pub(crate) fn init_method(contract_name: &str, impl_blocks: &[&ItemImpl]) -> Result<(), syn::Error> {
+pub(crate) fn init_method(
+    contract_name: &str,
+    impl_blocks: &[&ItemImpl],
+) -> Result<(), syn::Error> {
     // Find the `init` method in any impl block
     let init_method = impl_blocks.iter().find_map(|impl_block| {
         impl_block.items.iter().find_map(|item| {
@@ -419,10 +422,9 @@ mod tests {
             pub fn process<T>(&self, value: T) -> T { value }
         };
         let err = public_method(&method).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("cannot have generic or const parameters")
-        );
+        assert!(err
+            .to_string()
+            .contains("cannot have generic or const parameters"));
     }
 
     #[test]
@@ -440,10 +442,9 @@ mod tests {
             pub fn process<const N: usize>(&self) -> [u8; N] { [0; N] }
         };
         let err = public_method(&method).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("cannot have generic or const parameters")
-        );
+        assert!(err
+            .to_string()
+            .contains("cannot have generic or const parameters"));
     }
 
     #[test]
@@ -452,10 +453,9 @@ mod tests {
             pub fn process(&self, x: impl Display) {}
         };
         let err = public_method(&method).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("cannot use `impl Trait` in parameters")
-        );
+        assert!(err
+            .to_string()
+            .contains("cannot use `impl Trait` in parameters"));
     }
 
     #[test]
@@ -464,10 +464,9 @@ mod tests {
             pub fn iter(&self) -> impl Iterator<Item = u64> { std::iter::empty() }
         };
         let err = public_method(&method).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("cannot use `impl Trait` as return type")
-        );
+        assert!(err
+            .to_string()
+            .contains("cannot use `impl Trait` as return type"));
     }
 
     #[test]
@@ -519,8 +518,7 @@ mod tests {
             }
         };
         let impl_blocks = vec![&impl_block];
-        let err =
-            new_constructor("MyContract", &impl_blocks, &contract_struct).unwrap_err();
+        let err = new_constructor("MyContract", &impl_blocks, &contract_struct).unwrap_err();
         assert!(err.to_string().contains("const fn new() -> Self"));
     }
 
@@ -539,8 +537,7 @@ mod tests {
             }
         };
         let impl_blocks = vec![&impl_block];
-        let err =
-            new_constructor("MyContract", &impl_blocks, &contract_struct).unwrap_err();
+        let err = new_constructor("MyContract", &impl_blocks, &contract_struct).unwrap_err();
         assert!(err.to_string().contains("must be a `const fn`"));
     }
 
@@ -559,8 +556,7 @@ mod tests {
             }
         };
         let impl_blocks = vec![&impl_block];
-        let err =
-            new_constructor("MyContract", &impl_blocks, &contract_struct).unwrap_err();
+        let err = new_constructor("MyContract", &impl_blocks, &contract_struct).unwrap_err();
         assert!(err.to_string().contains("must have no parameters"));
     }
 
@@ -579,8 +575,7 @@ mod tests {
             }
         };
         let impl_blocks = vec![&impl_block];
-        let err =
-            new_constructor("MyContract", &impl_blocks, &contract_struct).unwrap_err();
+        let err = new_constructor("MyContract", &impl_blocks, &contract_struct).unwrap_err();
         assert!(err.to_string().contains("must return `Self`"));
     }
 
@@ -736,9 +731,8 @@ mod tests {
             fn process<T>(&self, value: T) {}
         };
         let err = trait_method(&method, "Processor", false).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("cannot have generic or const parameters")
-        );
+        assert!(err
+            .to_string()
+            .contains("cannot have generic or const parameters"));
     }
 }

@@ -48,9 +48,8 @@ use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::quote;
 use syn::{
-    Attribute, Expr, ExprCall, ExprLit, ExprPath, FnArg, ImplItemFn, Item, ItemImpl, ItemMod, Lit,
-    Type, parse_macro_input,
-    visit::Visit,
+    parse_macro_input, visit::Visit, Attribute, Expr, ExprCall, ExprLit, ExprPath, FnArg,
+    ImplItemFn, Item, ItemImpl, ItemMod, Lit, Type,
 };
 
 // ============================================================================
