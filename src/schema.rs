@@ -13,7 +13,7 @@ use serde::Serialize;
 
 /// Schema for a contract function.
 #[derive(Debug, Clone, Copy, Serialize)]
-pub struct FunctionSchema {
+pub struct Function {
     /// Function name.
     pub name: &'static str,
     /// Documentation string.
@@ -28,7 +28,7 @@ pub struct FunctionSchema {
 
 /// Schema for a contract event.
 #[derive(Debug, Clone, Copy, Serialize)]
-pub struct EventSchema {
+pub struct Event {
     /// Event topic string.
     pub topic: &'static str,
     /// Event data type name.
@@ -37,7 +37,7 @@ pub struct EventSchema {
 
 /// Schema for an imported type.
 #[derive(Debug, Clone, Copy, Serialize)]
-pub struct ImportSchema {
+pub struct Import {
     /// The short name used in the contract (e.g., `SetU64`).
     pub name: &'static str,
     /// The full path to the type (e.g., `evm_core::standard_bridge::SetU64`).
@@ -46,48 +46,48 @@ pub struct ImportSchema {
 
 /// Complete schema for a contract.
 #[derive(Debug, Clone, Copy, Serialize)]
-pub struct ContractSchema {
+pub struct Contract {
     /// Contract name.
     pub name: &'static str,
     /// List of imported types with their full paths.
-    pub imports: &'static [ImportSchema],
+    pub imports: &'static [Import],
     /// List of contract functions.
-    pub functions: &'static [FunctionSchema],
+    pub functions: &'static [Function],
     /// List of contract events.
-    pub events: &'static [EventSchema],
+    pub events: &'static [Event],
 }
 
-impl ContractSchema {
+impl Contract {
     /// Returns an iterator over all imports.
-    pub fn iter_imports(&self) -> impl Iterator<Item = &ImportSchema> {
+    pub fn iter_imports(&self) -> impl Iterator<Item = &Import> {
         self.imports.iter()
     }
 
     /// Returns an iterator over all functions.
-    pub fn iter_functions(&self) -> impl Iterator<Item = &FunctionSchema> {
+    pub fn iter_functions(&self) -> impl Iterator<Item = &Function> {
         self.functions.iter()
     }
 
     /// Returns an iterator over all events.
-    pub fn iter_events(&self) -> impl Iterator<Item = &EventSchema> {
+    pub fn iter_events(&self) -> impl Iterator<Item = &Event> {
         self.events.iter()
     }
 
     /// Find an import by short name.
     #[must_use]
-    pub fn get_import(&self, name: &str) -> Option<&ImportSchema> {
+    pub fn get_import(&self, name: &str) -> Option<&Import> {
         self.imports.iter().find(|i| i.name == name)
     }
 
     /// Find a function by name.
     #[must_use]
-    pub fn get_function(&self, name: &str) -> Option<&FunctionSchema> {
+    pub fn get_function(&self, name: &str) -> Option<&Function> {
         self.functions.iter().find(|f| f.name == name)
     }
 
     /// Find an event by topic.
     #[must_use]
-    pub fn get_event(&self, topic: &str) -> Option<&EventSchema> {
+    pub fn get_event(&self, topic: &str) -> Option<&Event> {
         self.events.iter().find(|e| e.topic == topic)
     }
 }
