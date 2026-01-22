@@ -273,6 +273,8 @@ pub(crate) fn output_type(ret: &ReturnType) -> (TokenStream2, bool) {
 }
 
 /// Extract all `abi::emit()` calls from an impl block.
+///
+/// Events are deduplicated by topic, keeping only the first occurrence.
 pub(crate) fn emit_calls(impl_block: &ItemImpl) -> Vec<EventInfo> {
     use syn::visit::Visit;
 
@@ -389,7 +391,10 @@ fn imports(items: &[Item]) -> Result<Vec<ImportInfo>, syn::Error> {
     Ok(result)
 }
 
-/// Find the contract struct (the single pub struct in the module).
+/// Find the contract struct in the module.
+///
+/// The module must contain exactly one `pub struct` which serves as the contract state.
+/// Returns an error if there are zero or multiple public structs.
 fn contract_struct<'a>(
     module: &'a ItemMod,
     items: &'a [Item],
@@ -426,6 +431,8 @@ fn contract_struct<'a>(
 }
 
 /// Find inherent impl blocks for the contract struct.
+///
+/// Returns all `impl ContractName { ... }` blocks (without a trait).
 fn impl_blocks<'a>(items: &'a [Item], contract_name: &str) -> Vec<&'a ItemImpl> {
     items
         .iter()
@@ -444,6 +451,9 @@ fn impl_blocks<'a>(items: &'a [Item], contract_name: &str) -> Vec<&'a ItemImpl> 
 }
 
 /// Find trait impl blocks with `#[contract(expose = [...])]` attributes.
+///
+/// Only trait implementations that have an explicit expose list are returned.
+/// The expose list specifies which trait methods should have extern wrappers generated.
 fn trait_impls<'a>(items: &'a [Item], contract_name: &str) -> Vec<TraitImplInfo<'a>> {
     items
         .iter()
