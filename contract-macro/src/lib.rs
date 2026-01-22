@@ -278,6 +278,158 @@ fn extract_imports_from_tree(tree: &UseTree, prefix: &str) -> ImportExtraction {
     }
 }
 
+/// Extract methods from a trait impl block based on the expose list.
+///
+/// Only methods whose names appear in the `expose_list` will be extracted.
+/// Methods are validated the same way as inherent public methods.
+fn extract_trait_methods(
+    trait_impl: &TraitImplInfo,
+) -> Result<Vec<FunctionInfo>, syn::Error> {
+    let mut functions = Vec::new();
+
+    for item in &trait_impl.impl_block.items {
+        if let ImplItem::Fn(method) = item {
+            let method_name = method.sig.ident.to_string();
+
+            // Only process methods in the expose list
+            if !trait_impl.expose_list.contains(&method_name) {
+                continue;
+            }
+
+            // Validate the method (same rules as public methods)
+            validate_trait_method(method, &trait_impl.trait_name)?;
+
+            let name = method.sig.ident.clone();
+            let doc = extract_doc_comment(&method.attrs);
+            let is_custom = has_custom_attribute(&method.attrs);
+
+            // Extract parameters (name and type)
+            let params = extract_parameters(method);
+
+            // Extract input type (parameters after self)
+            let input_type = extract_input_type(&params);
+
+            // Extract output type (dereferenced if it's a reference)
+            let (output_type, returns_ref) = extract_output_type(&method.sig.output);
+
+            functions.push(FunctionInfo {
+                name,
+                doc,
+                params,
+                input_type,
+                output_type,
+                is_custom,
+                returns_ref,
+            });
+        }
+    }
+
+    // Check that all methods in expose list were found
+    for method_name in &trait_impl.expose_list {
+        if !functions.iter().any(|f| f.name == method_name) {
+            return Err(syn::Error::new_spanned(
+                trait_impl.impl_block,
+                format!(
+                    "method `{method_name}` listed in expose but not found in `impl {} for ...`; \
+                     if it's a default implementation, add an override that calls the default",
+                    trait_impl.trait_name
+                ),
+            ));
+        }
+    }
+
+    Ok(functions)
+}
+
+/// Validate a method from a trait impl block.
+///
+/// Similar to `validate_public_method` but with trait-specific error messages.
+fn validate_trait_method(method: &ImplItemFn, trait_name: &str) -> Result<(), syn::Error> {
+    let name = &method.sig.ident;
+
+    // Check for generic type or const parameters
+    if !method.sig.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &method.sig.generics,
+            format!(
+                "trait method `{trait_name}::{name}` cannot have generic or const parameters; \
+                 extern \"C\" wrappers require concrete types"
+            ),
+        ));
+    }
+
+    // Check for async
+    if method.sig.asyncness.is_some() {
+        return Err(syn::Error::new_spanned(
+            method.sig.asyncness,
+            format!(
+                "trait method `{trait_name}::{name}` cannot be async; \
+                 WASM contracts do not support async execution"
+            ),
+        ));
+    }
+
+    // Check for impl Trait in parameters
+    for arg in &method.sig.inputs {
+        if let FnArg::Typed(pat_type) = arg
+            && let Type::ImplTrait(_) = &*pat_type.ty
+        {
+            return Err(syn::Error::new_spanned(
+                &pat_type.ty,
+                format!(
+                    "trait method `{trait_name}::{name}` cannot use `impl Trait` in parameters; \
+                     extern \"C\" wrappers require concrete types"
+                ),
+            ));
+        }
+    }
+
+    // Check for impl Trait in return type
+    if let ReturnType::Type(_, ty) = &method.sig.output
+        && let Type::ImplTrait(_) = &**ty
+    {
+        return Err(syn::Error::new_spanned(
+            ty,
+            format!(
+                "trait method `{trait_name}::{name}` cannot use `impl Trait` as return type; \
+                 extern \"C\" wrappers require concrete types"
+            ),
+        ));
+    }
+
+    // Check for self receiver
+    let receiver = method.sig.inputs.first().and_then(|arg| {
+        if let FnArg::Receiver(r) = arg {
+            Some(r)
+        } else {
+            None
+        }
+    });
+
+    let Some(receiver) = receiver else {
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            format!(
+                "trait method `{trait_name}::{name}` must have a `self` receiver; \
+                 associated functions cannot be exposed as contract methods"
+            ),
+        ));
+    };
+
+    // Check that self is borrowed, not consumed
+    if receiver.reference.is_none() {
+        return Err(syn::Error::new_spanned(
+            receiver,
+            format!(
+                "trait method `{trait_name}::{name}` cannot consume `self`; \
+                 use `&self` or `&mut self` instead"
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Extract public methods from an impl block.
 ///
 /// Note: The `new` method is skipped because it's a special constructor
@@ -403,6 +555,63 @@ fn has_custom_attribute(attrs: &[Attribute]) -> bool {
         }
         false
     })
+}
+
+/// Extract the `expose = [method1, method2, ...]` list from a `#[contract(...)]` attribute.
+///
+/// Returns `None` if there's no `#[contract(expose = [...])]` attribute.
+/// Returns `Some(vec![...])` with the method names if found.
+fn extract_expose_list(attrs: &[Attribute]) -> Option<Vec<String>> {
+    for attr in attrs {
+        if !attr.path().is_ident("contract") {
+            continue;
+        }
+
+        let Ok(meta) = attr.meta.require_list() else {
+            continue;
+        };
+
+        // Parse: expose = [method1, method2, ...]
+        let tokens = meta.tokens.clone();
+        let mut iter = tokens.into_iter().peekable();
+
+        // Look for "expose"
+        let Some(proc_macro2::TokenTree::Ident(ident)) = iter.next() else {
+            continue;
+        };
+        if ident != "expose" {
+            continue;
+        }
+
+        // Expect "="
+        let Some(proc_macro2::TokenTree::Punct(punct)) = iter.next() else {
+            continue;
+        };
+        if punct.as_char() != '=' {
+            continue;
+        }
+
+        // Expect "[...]"
+        let Some(proc_macro2::TokenTree::Group(group)) = iter.next() else {
+            continue;
+        };
+        if group.delimiter() != proc_macro2::Delimiter::Bracket {
+            continue;
+        }
+
+        // Parse the method names from the group
+        let mut methods = Vec::new();
+        for token in group.stream() {
+            if let proc_macro2::TokenTree::Ident(method_ident) = token {
+                methods.push(method_ident.to_string());
+            }
+            // Skip commas and other punctuation
+        }
+
+        return Some(methods);
+    }
+
+    None
 }
 
 /// Build the input type from extracted parameters.
@@ -623,8 +832,14 @@ fn generate_extern_wrappers(functions: &[FunctionInfo]) -> TokenStream2 {
     }
 }
 
-/// Strip #[contract(...)] attributes from methods in the impl block.
+/// Strip #[contract(...)] attributes from the impl block and its methods.
 fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
+    // Strip from the impl block itself (e.g., #[contract(expose = [...])])
+    impl_block
+        .attrs
+        .retain(|attr| !attr.path().is_ident("contract"));
+
+    // Strip from methods (e.g., #[contract(custom)])
     for item in &mut impl_block.items {
         if let ImplItem::Fn(method) = item {
             method
@@ -635,12 +850,24 @@ fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
     impl_block
 }
 
+/// Information about a trait implementation with exposed methods.
+struct TraitImplInfo<'a> {
+    /// The name of the trait being implemented (for error messages).
+    trait_name: String,
+    /// The impl block itself.
+    impl_block: &'a ItemImpl,
+    /// List of method names to expose (from `#[contract(expose = [...])]`).
+    expose_list: Vec<String>,
+}
+
 /// Validated contract module data extracted during parsing.
 struct ContractData<'a> {
     imports: Vec<ImportInfo>,
     contract_name: String,
     contract_ident: Ident,
     impl_blocks: Vec<&'a ItemImpl>,
+    /// Trait implementations with `#[contract(expose = [...])]` attributes.
+    trait_impls: Vec<TraitImplInfo<'a>>,
 }
 
 /// Validate that a public method has a supported signature for extern wrapper generation.
@@ -1024,11 +1251,40 @@ fn validate_and_extract<'a>(
     // Validate the `init` method if present
     validate_init_method(&contract_name, &impl_blocks)?;
 
+    // Find trait impl blocks for the contract struct that have #[contract(expose = [...])]
+    let trait_impls: Vec<TraitImplInfo> = items
+        .iter()
+        .filter_map(|item| {
+            if let Item::Impl(impl_block) = item
+                && let Some((_, trait_path, _)) = &impl_block.trait_
+                && let Type::Path(type_path) = &*impl_block.self_ty
+                && type_path.path.is_ident(&contract_name)
+            {
+                // Check for #[contract(expose = [...])] attribute
+                if let Some(expose_list) = extract_expose_list(&impl_block.attrs) {
+                    let trait_name = trait_path
+                        .segments
+                        .iter()
+                        .map(|s| s.ident.to_string())
+                        .collect::<Vec<_>>()
+                        .join("::");
+                    return Some(TraitImplInfo {
+                        trait_name,
+                        impl_block,
+                        expose_list,
+                    });
+                }
+            }
+            None
+        })
+        .collect();
+
     Ok(ContractData {
         imports,
         contract_name,
         contract_ident: contract_struct.ident.clone(),
         impl_blocks,
+        trait_impls,
     })
 }
 
@@ -1073,15 +1329,25 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         contract_name,
         contract_ident,
         impl_blocks,
+        trait_impls,
     } = data;
 
-    // Extract functions and events from all impl blocks
+    // Extract functions and events from all inherent impl blocks
     let mut functions = Vec::new();
     let mut events = Vec::new();
 
     for impl_block in &impl_blocks {
         functions.extend(extract_public_methods(impl_block));
         events.extend(extract_emit_calls(impl_block));
+    }
+
+    // Extract functions and events from trait impl blocks with expose lists
+    for trait_impl in &trait_impls {
+        match extract_trait_methods(trait_impl) {
+            Ok(trait_functions) => functions.extend(trait_functions),
+            Err(e) => return e.to_compile_error().into(),
+        }
+        events.extend(extract_emit_calls(trait_impl.impl_block));
     }
 
     // Deduplicate events by topic
@@ -1109,10 +1375,10 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .iter()
         .map(|item| {
             if let Item::Impl(impl_block) = item
-                && impl_block.trait_.is_none()
                 && let Type::Path(type_path) = &*impl_block.self_ty
                 && type_path.path.is_ident(&contract_name)
             {
+                // Strip #[contract(...)] attributes from both inherent and trait impl blocks
                 Item::Impl(strip_contract_attributes(impl_block.clone()))
             } else {
                 item.clone()
@@ -1891,5 +2157,171 @@ mod tests {
         let impl_blocks = vec![&impl_block];
         let err = validate_init_method("MyContract", &impl_blocks).unwrap_err();
         assert!(err.to_string().contains("must return `()`"));
+    }
+
+    // Tests for trait impl handling
+
+    #[test]
+    fn test_extract_expose_list_simple() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            #[contract(expose = [owner, transfer_ownership])]
+            impl OwnableTrait for MyContract {
+                fn owner(&self) -> Address { self.owner }
+            }
+        };
+        let expose_list = extract_expose_list(&impl_block.attrs);
+        assert!(expose_list.is_some());
+        let list = expose_list.unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list.contains(&"owner".to_string()));
+        assert!(list.contains(&"transfer_ownership".to_string()));
+    }
+
+    #[test]
+    fn test_extract_expose_list_single() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            #[contract(expose = [version])]
+            impl ISemver for MyContract {}
+        };
+        let expose_list = extract_expose_list(&impl_block.attrs);
+        assert!(expose_list.is_some());
+        let list = expose_list.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0], "version");
+    }
+
+    #[test]
+    fn test_extract_expose_list_none() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl OwnableTrait for MyContract {
+                fn owner(&self) -> Address { self.owner }
+            }
+        };
+        let expose_list = extract_expose_list(&impl_block.attrs);
+        assert!(expose_list.is_none());
+    }
+
+    #[test]
+    fn test_extract_expose_list_other_attribute() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            #[derive(Debug)]
+            impl OwnableTrait for MyContract {
+                fn owner(&self) -> Address { self.owner }
+            }
+        };
+        let expose_list = extract_expose_list(&impl_block.attrs);
+        assert!(expose_list.is_none());
+    }
+
+    #[test]
+    fn test_extract_trait_methods_success() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            #[contract(expose = [owner])]
+            impl OwnableTrait for MyContract {
+                fn owner(&self) -> Option<Address> { self.owner }
+                fn owner_mut(&mut self) -> &mut Option<Address> { &mut self.owner }
+            }
+        };
+        let trait_impl = TraitImplInfo {
+            trait_name: "OwnableTrait".to_string(),
+            impl_block: &impl_block,
+            expose_list: vec!["owner".to_string()],
+        };
+        let result = extract_trait_methods(&trait_impl);
+        assert!(result.is_ok());
+        let functions = result.unwrap();
+        assert_eq!(functions.len(), 1);
+        assert_eq!(functions[0].name.to_string(), "owner");
+    }
+
+    #[test]
+    fn test_extract_trait_methods_multiple() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            #[contract(expose = [owner, transfer_ownership])]
+            impl OwnableTrait for MyContract {
+                fn owner(&self) -> Option<Address> { self.owner }
+                fn owner_mut(&mut self) -> &mut Option<Address> { &mut self.owner }
+                fn transfer_ownership(&mut self, new_owner: Address) {
+                    self.owner = Some(new_owner);
+                }
+            }
+        };
+        let trait_impl = TraitImplInfo {
+            trait_name: "OwnableTrait".to_string(),
+            impl_block: &impl_block,
+            expose_list: vec!["owner".to_string(), "transfer_ownership".to_string()],
+        };
+        let result = extract_trait_methods(&trait_impl);
+        assert!(result.is_ok());
+        let functions = result.unwrap();
+        assert_eq!(functions.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_trait_methods_missing_method() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            #[contract(expose = [owner, nonexistent])]
+            impl OwnableTrait for MyContract {
+                fn owner(&self) -> Option<Address> { self.owner }
+            }
+        };
+        let trait_impl = TraitImplInfo {
+            trait_name: "OwnableTrait".to_string(),
+            impl_block: &impl_block,
+            expose_list: vec!["owner".to_string(), "nonexistent".to_string()],
+        };
+        let result = extract_trait_methods(&trait_impl);
+        let Err(err) = result else {
+            panic!("expected error for missing method");
+        };
+        assert!(err.to_string().contains("nonexistent"));
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_validate_trait_method_valid() {
+        let method: ImplItemFn = syn::parse_quote! {
+            fn owner(&self) -> Option<Address> { self.owner }
+        };
+        assert!(validate_trait_method(&method, "OwnableTrait").is_ok());
+    }
+
+    #[test]
+    fn test_validate_trait_method_mut_self() {
+        let method: ImplItemFn = syn::parse_quote! {
+            fn transfer(&mut self, to: Address) {}
+        };
+        assert!(validate_trait_method(&method, "OwnableTrait").is_ok());
+    }
+
+    #[test]
+    fn test_validate_trait_method_no_self() {
+        let method: ImplItemFn = syn::parse_quote! {
+            fn version() -> String { "1.0".to_string() }
+        };
+        let err = validate_trait_method(&method, "ISemver").unwrap_err();
+        assert!(err.to_string().contains("must have a `self` receiver"));
+        assert!(err.to_string().contains("ISemver::version"));
+    }
+
+    #[test]
+    fn test_validate_trait_method_consuming_self() {
+        let method: ImplItemFn = syn::parse_quote! {
+            fn destroy(self) {}
+        };
+        let err = validate_trait_method(&method, "Destructible").unwrap_err();
+        assert!(err.to_string().contains("cannot consume `self`"));
+    }
+
+    #[test]
+    fn test_validate_trait_method_generic() {
+        let method: ImplItemFn = syn::parse_quote! {
+            fn process<T>(&self, value: T) {}
+        };
+        let err = validate_trait_method(&method, "Processor").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("cannot have generic or const parameters")
+        );
     }
 }
