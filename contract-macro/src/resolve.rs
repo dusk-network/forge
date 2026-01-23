@@ -51,7 +51,7 @@ fn resolve_type(ty: &TokenStream2, import_map: &HashMap<String, String>) -> Stri
     ty_str
 }
 
-/// Resolve a syn::Type to its fully qualified string form.
+/// Resolve a `syn::Type` to its fully qualified string form.
 fn resolve_syn_type(ty: &syn::Type, import_map: &HashMap<String, String>) -> String {
     match ty {
         syn::Type::Path(type_path) => resolve_type_path(type_path, import_map),
@@ -72,7 +72,7 @@ fn resolve_syn_type(ty: &syn::Type, import_map: &HashMap<String, String>) -> Str
     }
 }
 
-/// Resolve a TypePath to its fully qualified string form.
+/// Resolve a `TypePath` to its fully qualified string form.
 fn resolve_type_path(type_path: &syn::TypePath, import_map: &HashMap<String, String>) -> String {
     let path = &type_path.path;
     let segments: Vec<_> = path.segments.iter().collect();
@@ -143,7 +143,7 @@ fn format_generic_args(
     }
 }
 
-/// Resolve a path string (like "events::PauseToggled::PAUSED") using the import map.
+/// Resolve a path string (like `events::PauseToggled::PAUSED`) using the import map.
 ///
 /// The first segment is looked up in the import map and resolved if found.
 fn resolve_path_string(path: &str, import_map: &HashMap<String, String>) -> String {

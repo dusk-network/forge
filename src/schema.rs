@@ -9,6 +9,8 @@
 //! These types are used by the `#[contract]` macro to generate
 //! compile-time contract schemas that describe functions and events.
 
+extern crate alloc;
+
 use serde::Serialize;
 
 /// Schema for a contract function.
@@ -89,5 +91,11 @@ impl Contract {
     #[must_use]
     pub fn get_event(&self, topic: &str) -> Option<&Event> {
         self.events.iter().find(|e| e.topic == topic)
+    }
+
+    /// Serialize the schema to a JSON string.
+    #[must_use]
+    pub fn to_json(&self) -> alloc::string::String {
+        serde_json::to_string(self).unwrap_or_else(|_| alloc::string::String::from("{}"))
     }
 }

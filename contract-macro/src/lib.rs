@@ -393,15 +393,16 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .collect();
 
     // Output:
+    // - Contract schema at crate root (always available)
     // - Contract module wrapped in #[cfg(not(feature = "data-driver"))]
     // - Data driver module at crate root with #[cfg(feature = "data-driver")]
     let output = quote! {
+        #schema
+
         #[cfg(not(feature = "data-driver"))]
         #(#mod_attrs)*
         #mod_vis mod #mod_name {
             #(#new_items)*
-
-            #schema
 
             #state_static
 

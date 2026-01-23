@@ -171,12 +171,12 @@ mod test_bridge {
 
 #[test]
 fn test_schema_contract_name() {
-    assert_eq!(test_bridge::CONTRACT_SCHEMA.name, "TestBridge");
+    assert_eq!(CONTRACT_SCHEMA.name, "TestBridge");
 }
 
 #[test]
 fn test_imports_extracted() {
-    let imports: Vec<_> = test_bridge::CONTRACT_SCHEMA.iter_imports().collect();
+    let imports: Vec<_> = CONTRACT_SCHEMA.iter_imports().collect();
 
     // Check that key imports are captured
     let names: Vec<_> = imports.iter().map(|i| i.name).collect();
@@ -196,7 +196,7 @@ fn test_imports_extracted() {
 
 #[test]
 fn test_public_functions_extracted() {
-    let names: Vec<_> = test_bridge::CONTRACT_SCHEMA
+    let names: Vec<_> = CONTRACT_SCHEMA
         .iter_functions()
         .map(|f| f.name)
         .collect();
@@ -222,17 +222,17 @@ fn test_public_functions_extracted() {
 
 #[test]
 fn test_function_signatures() {
-    let init = test_bridge::CONTRACT_SCHEMA.get_function("init").unwrap();
+    let init = CONTRACT_SCHEMA.get_function("init").unwrap();
     assert_eq!(init.doc, "Initializes the contract with an owner.");
     assert!(init.input.contains("DSAddress"));
 
-    let is_paused = test_bridge::CONTRACT_SCHEMA
+    let is_paused = CONTRACT_SCHEMA
         .get_function("is_paused")
         .unwrap();
     assert!(is_paused.input.contains("()"));
     assert!(is_paused.output.contains("bool"));
 
-    let pending = test_bridge::CONTRACT_SCHEMA
+    let pending = CONTRACT_SCHEMA
         .get_function("pending_withdrawal")
         .unwrap();
     assert!(pending.input.contains("WithdrawalId"));
@@ -242,7 +242,7 @@ fn test_function_signatures() {
 
 #[test]
 fn test_events_extracted() {
-    let topics: Vec<_> = test_bridge::CONTRACT_SCHEMA
+    let topics: Vec<_> = CONTRACT_SCHEMA
         .iter_events()
         .map(|e| e.topic)
         .collect();
@@ -260,17 +260,17 @@ fn test_events_extracted() {
 
 #[test]
 fn test_event_data_types() {
-    let paused = test_bridge::CONTRACT_SCHEMA
+    let paused = CONTRACT_SCHEMA
         .get_event("events::PauseToggled::PAUSED")
         .unwrap();
     assert!(paused.data.contains("PauseToggled"));
 
-    let deposited = test_bridge::CONTRACT_SCHEMA
+    let deposited = CONTRACT_SCHEMA
         .get_event("events::TransactionDeposited::TOPIC")
         .unwrap();
     assert!(deposited.data.contains("TransactionDeposited"));
 
-    let finalized = test_bridge::CONTRACT_SCHEMA
+    let finalized = CONTRACT_SCHEMA
         .get_event("events::BridgeFinalized::TOPIC")
         .unwrap();
     assert!(finalized.data.contains("BridgeFinalized"));
@@ -281,7 +281,7 @@ fn test_schema_matches_expected_json() {
     let expected = include_str!("assets/test_bridge_schema.json");
     let expected: serde_json::Value = serde_json::from_str(expected).unwrap();
 
-    let actual = serde_json::to_value(test_bridge::CONTRACT_SCHEMA).unwrap();
+    let actual = serde_json::to_value(CONTRACT_SCHEMA).unwrap();
 
     assert_eq!(expected, actual);
 }
@@ -289,6 +289,6 @@ fn test_schema_matches_expected_json() {
 #[test]
 #[ignore]
 fn print_schema_json() {
-    let json = serde_json::to_string_pretty(&test_bridge::CONTRACT_SCHEMA).unwrap();
+    let json = serde_json::to_string_pretty(&CONTRACT_SCHEMA).unwrap();
     println!("{json}");
 }

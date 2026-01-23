@@ -18,7 +18,7 @@ use quote::quote;
 use crate::resolve::TypeMap;
 use crate::{EventInfo, FunctionInfo};
 
-/// Generate the data_driver module at crate root level.
+/// Generate the `data_driver` module at crate root level.
 pub(crate) fn module(
     type_map: &TypeMap,
     functions: &[FunctionInfo],
@@ -100,8 +100,7 @@ pub(crate) fn module(
                 }
 
                 fn get_schema(&self) -> String {
-                    // Schema not available when contract module isn't compiled
-                    String::from("{}")
+                    super::CONTRACT_SCHEMA.to_json()
                 }
             }
 
@@ -112,7 +111,7 @@ pub(crate) fn module(
     }
 }
 
-/// Get the resolved type path from the type_map, or return the original if not found.
+/// Get the resolved type path from the `type_map`, or return the original if not found.
 fn get_resolved_type(ty: &TokenStream2, type_map: &TypeMap) -> TokenStream2 {
     let key = ty.to_string();
     if let Some(resolved) = type_map.get(&key) {
@@ -222,7 +221,7 @@ fn generate_decode_event_arms(events: &[EventInfo], type_map: &TypeMap) -> Vec<T
                 // Skip variable references (single lowercase identifier)
                 if topic_path.segments.len() == 1 {
                     let name = topic_path.segments[0].ident.to_string();
-                    if name.chars().next().map_or(false, |c| c.is_lowercase()) {
+                    if name.chars().next().map_or(false, char::is_lowercase) {
                         return None;
                     }
                 }

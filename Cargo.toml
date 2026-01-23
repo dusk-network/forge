@@ -6,11 +6,11 @@ edition = "2021"
 [dependencies]
 contract-macro = { path = "contract-macro" }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 dusk-core = "1.4"
 evm-core = { path = "../DuskEVM/L1Contracts/core" }
-serde_json = "1"
 
 [workspace]
 members = ["contract-macro"]
