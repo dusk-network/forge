@@ -39,9 +39,11 @@
 #![deny(clippy::pedantic)]
 #![warn(missing_debug_implementations, unreachable_pub, rustdoc::all)]
 
+mod data_driver;
 mod extract;
 mod generate;
 mod parse;
+mod resolve;
 mod validate;
 
 use proc_macro::TokenStream;
@@ -364,6 +366,12 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Generate extern "C" wrappers
     let externs = generate::extern_wrappers(&functions, &contract_ident);
 
+    // Build resolved type map for data_driver
+    let type_map = resolve::build_type_map(&imports, &functions, &events);
+
+    // Generate data_driver module at crate root level (outside contract module)
+    let data_driver = data_driver::module(&type_map, &functions, &events);
+
     // Rebuild the module with stripped contract attributes on methods
     let mod_vis = &module.vis;
     let mod_name = &module.ident;
@@ -384,8 +392,11 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect();
 
-    // Output: module with schema, state, and externs added
+    // Output:
+    // - Contract module wrapped in #[cfg(not(feature = "data-driver"))]
+    // - Data driver module at crate root with #[cfg(feature = "data-driver")]
     let output = quote! {
+        #[cfg(not(feature = "data-driver"))]
         #(#mod_attrs)*
         #mod_vis mod #mod_name {
             #(#new_items)*
@@ -396,6 +407,8 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             #externs
         }
+
+        #data_driver
     };
 
     output.into()

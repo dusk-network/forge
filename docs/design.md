@@ -303,9 +303,9 @@ That's it. **~15 lines** instead of **~300 lines**.
 
 ## Implementation Plan
 
-### Phase 1: `#[contract]` Proc Macro
+### Phase 1: `#[contract]` Proc Macro ✅ IMPLEMENTED
 
-**Crate:** `dusk-contract-macros`
+**Crate:** `contract-macro` (in `dusk-wasm`)
 
 **Input:** Annotated impl block
 **Output:**
@@ -334,39 +334,58 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 ```
 
-### Phase 2: `generate_data_driver!` Macro
+### Phase 2: Data-Driver Module Generation ✅ IMPLEMENTED
 
-**Crate:** `dusk-data-driver`
+**Approach:** Generate a `data_driver` module at crate root level, feature-gated with
+`#[cfg(feature = "data-driver")]`. The contract module is wrapped with
+`#[cfg(not(feature = "data-driver"))]`, making them mutually exclusive.
 
-**Input:** Schema constant
-**Output:** Complete `ConvertibleContract` implementation
+**Key insight:** The `#[contract]` macro already has all the type information at expansion
+time. Rather than trying to read `CONTRACT_SCHEMA` at runtime (which proc macros cannot do),
+we generate the data-driver implementation alongside the contract code.
 
-```rust
-#[proc_macro]
-pub fn generate_data_driver(input: TokenStream) -> TokenStream {
-    let schema_path: Path = parse(input);
+**Implementation:**
 
-    // Generate match arms for each function
-    let encode_arms = generate_encode_arms(&schema);
-    let decode_input_arms = generate_decode_input_arms(&schema);
-    let decode_output_arms = generate_decode_output_arms(&schema);
-    let decode_event_arms = generate_decode_event_arms(&schema);
+1. **Type Resolution (`resolve.rs`):** Resolves short type names to fully-qualified paths
+   at extraction time, handling:
+   - Simple types: `Deposit` → `evm_core::standard_bridge::Deposit`
+   - Aliases: `DSAddress` → `evm_core::Address`
+   - Multi-segment paths: `events::PauseToggled` → `evm_core::standard_bridge::events::PauseToggled`
+   - Generics: `Option<Deposit>` → `Option<evm_core::standard_bridge::Deposit>`
+   - Event topic paths: `events::PauseToggled::PAUSED` → full path
 
-    quote! {
-        pub struct ContractDriver;
+2. **Data-Driver Generation (`data_driver.rs`):** Generates the `Driver` struct and
+   `ConvertibleContract` implementation using pre-resolved type paths.
 
-        impl ConvertibleContract for ContractDriver {
-            fn encode_input_fn(&self, fn_name: &str, json: &str) -> Result<Vec<u8>, Error> {
-                match fn_name {
-                    #encode_arms
-                    name => Err(Error::Unsupported(format!("fn {name}")))
-                }
-            }
-            // ... other methods
-        }
-    }
-}
+3. **Feature-Gated Output:** The macro outputs:
+   ```rust
+   #[cfg(not(feature = "data-driver"))]
+   mod contract_name {
+       // Contract code, schema, extern wrappers
+   }
+
+   #[cfg(feature = "data-driver")]
+   pub mod data_driver {
+       // Driver struct implementing ConvertibleContract
+       // WASM entrypoint via generate_wasm_entrypoint!
+   }
+   ```
+
+**Contract Cargo.toml configuration:**
+```toml
+[features]
+default = ["contract"]
+contract = ["dusk-core/abi-dlmalloc", "evm-core/abi"]
+data-driver = ["dep:dusk-data-driver", "dusk-data-driver/wasm-export", "evm-core/serde"]
+
+[dependencies]
+dusk-core = { workspace = true }  # Always available for types
+dusk-data-driver = { workspace = true, optional = true }
 ```
+
+**Build commands:**
+- `make wasm` → Contract WASM (default features)
+- `make wasm-dd` → Data-driver WASM (`--no-default-features --features data-driver`)
 
 ### Phase 3: Event Detection
 
@@ -396,11 +415,12 @@ fn extract_emit_calls(impl_block: &ItemImpl) -> Vec<Event> {
 
 ## Comparison
 
-| Aspect | Current | With Macros |
-|--------|---------|-------------|
-| Add new function | Edit 3 files | Edit 1 file (state.rs) |
+| Aspect | Before | After (Phase 1 + 2) |
+|--------|--------|---------------------|
+| Add new function | Edit 3 files | Edit 1 file |
 | Lines in lib.rs | ~100 (34 externs) | 0 (generated) |
-| Lines in data-driver | ~300 | ~15 (custom only) |
+| Lines in data-driver crate | ~300 | 0 (generated in contract crate) |
+| Separate data-driver crate | Required | Not needed |
 | Schema | `todo!()` | Auto-generated |
 | Can schema drift? | Yes (manual sync) | No (derived) |
 | Type safety | Runtime errors | Compile-time |
@@ -475,29 +495,24 @@ fn only_owner(&self)  // No `pub` = not exported
 + // Empty or minimal - externs are generated
 ```
 
-### Data-Driver Crate
+### Data-Driver (No Separate Crate Needed)
+
+The data-driver is now generated directly in the contract crate, eliminating the need
+for a separate `data-drivers/StandardBridge` crate:
 
 ```diff
-  // data-drivers/StandardBridge/src/lib.rs
-- impl ConvertibleContract for ContractDriver {
--     fn encode_input_fn(&self, fn_name: &str, json: &str) -> Result<Vec<u8>, Error> {
--         match fn_name {
--             "init" => json_to_rkyv::<DSAddress>(json),
--             "is_paused" => json_to_rkyv::<()>(json),
--             // ... 50+ more arms
--         }
--     }
--     // ... 3 more methods with 50+ arms each
-- }
-+ use standard_bridge::CONTRACT_SCHEMA;
-+ generate_data_driver!(CONTRACT_SCHEMA);
-+
-+ #[custom_handler(extra_data)]
-+ fn encode_extra_data(json: &str) -> Result<Vec<u8>, Error> { ... }
-+
-+ #[custom_handler(extra_data)]
-+ fn decode_extra_data(rkyv: &[u8]) -> Result<JsonValue, Error> { ... }
+  // StandardBridge/Cargo.toml
++ [features]
++ default = ["contract"]
++ contract = ["dusk-core/abi-dlmalloc", "evm-core/abi"]
++ data-driver = ["dep:dusk-data-driver", "dusk-data-driver/wasm-export", "evm-core/serde"]
 ```
+
+**Build both WASMs from the same crate:**
+- `make wasm` → `standard_bridge.wasm` (177K)
+- `make wasm-dd` → `standard_bridge_dd.wasm` (342K)
+
+The separate `data-drivers/StandardBridge` crate (~300 lines) can be removed entirely.
 
 ---
 
