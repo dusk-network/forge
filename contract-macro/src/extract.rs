@@ -23,8 +23,9 @@ use crate::{
 /// Validate feed-related attributes for a method.
 ///
 /// Checks that:
-/// 1. If `abi::feed()` is used, the `#[contract(feeds = "Type")]` attribute is present
-/// 2. If present, the feeds type matches the fed expression (tuple vs non-tuple)
+/// 1. There is at most one `abi::feed()` call site in the function
+/// 2. If `abi::feed()` is used, the `#[contract(feeds = "Type")]` attribute is present
+/// 3. If present, the feeds type matches the fed expression (tuple vs non-tuple)
 ///
 /// Returns an error if validation fails.
 fn validate_feeds(
@@ -34,6 +35,23 @@ fn validate_feeds(
 ) -> Result<(), syn::Error> {
     let feed_exprs = get_feed_exprs(method);
 
+    // Check for multiple feed call sites
+    if feed_exprs.len() > 1 {
+        // Deduplicate to show unique expressions
+        let mut unique_exprs: Vec<_> = feed_exprs.clone();
+        unique_exprs.sort();
+        unique_exprs.dedup();
+
+        let exprs_list = unique_exprs.join("`, `");
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            format!(
+                "method `{name}` has multiple `abi::feed()` calls; \
+                 only one feed call site is allowed per function (found: `{exprs_list}`)"
+            ),
+        ));
+    }
+
     if let Some(ref ft) = feed_type {
         // Has feeds attribute - validate it matches the expressions
         if let Some(mismatch_msg) = validate_feed_type_match(&ft.to_string(), &feed_exprs) {
@@ -41,16 +59,12 @@ fn validate_feeds(
         }
     } else if !feed_exprs.is_empty() {
         // Uses abi::feed() but missing feeds attribute
-        let exprs_hint = if feed_exprs.len() == 1 {
-            format!("feeds: `{}`", feed_exprs[0])
-        } else {
-            format!("feeds: {}", feed_exprs.join(", "))
-        };
         return Err(syn::Error::new_spanned(
             &method.sig,
             format!(
                 "method `{name}` uses `abi::feed()` but is missing `#[contract(feeds = \"Type\")]` attribute; \
-                 {exprs_hint}"
+                 feeds: `{}`",
+                feed_exprs[0]
             ),
         ));
     }
