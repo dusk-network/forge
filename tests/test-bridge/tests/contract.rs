@@ -30,7 +30,7 @@ use tests_setup::TestSession;
 const DEPLOYER: [u8; 64] = [0u8; 64];
 
 const TEST_BRIDGE_BYTECODE: &[u8] =
-    include_bytes!("../../../target/wasm32-unknown-unknown/release/test_bridge.wasm");
+    include_bytes!("../../../target/contract/wasm32-unknown-unknown/release/test_bridge.wasm");
 pub const TEST_BRIDGE_ID: ContractId = ContractId::from_bytes([1; 32]);
 
 pub const INITIAL_DUSK_BALANCE: u64 = dusk(1_000.0);

@@ -26,10 +26,12 @@ evm-core = { path = "../../../DuskEVM/L1Contracts/core" }
 tests-setup = { path = "../../../DuskEVM/L1Contracts/tests" }
 rand = "0.8"
 serde_json = "1"
+wasmtime = "20"
 # Pin to avoid edition2024 issues (resolved via workspace)
 blake2b_simd = { workspace = true }
 blake3 = { workspace = true }
 constant_time_eq = { workspace = true }
+time-core = { workspace = true }
 
 [lib]
 crate-type = ["cdylib"]
