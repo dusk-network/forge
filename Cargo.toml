@@ -13,4 +13,17 @@ dusk-core = "1.4"
 evm-core = { path = "../DuskEVM/L1Contracts/core" }
 
 [workspace]
-members = ["contract-macro"]
+resolver = "2"
+members = ["contract-macro", "tests/test-bridge"]
+
+[workspace.package]
+edition = "2021"
+
+[workspace.dependencies]
+# Pin to match L1Contracts versions
+dusk-vm = { version = "=1.4.0", default-features = false }
+# Pin to avoid edition2024 issues with constant_time_eq
+blake2b_simd = "=1.0.2"
+blake3 = "=1.5.4"
+constant_time_eq = "=0.3.1"
+

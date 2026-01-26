@@ -1,0 +1,35 @@
+[package]
+name = "test-bridge"
+version = "0.1.0"
+edition.workspace = true
+
+[features]
+# Default: build as contract WASM
+default = ["contract"]
+# Build as contract WASM (includes dusk-core with abi-dlmalloc)
+contract = ["dusk-core/abi-dlmalloc", "evm-core/abi"]
+# Build as data-driver WASM (mutually exclusive with contract)
+data-driver = ["dep:dusk-data-driver", "dusk-data-driver/wasm-export", "evm-core/serde"]
+
+[dependencies]
+dusk-data-driver = { version = "0.3", optional = true }
+dusk-core = "1.4"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+evm-core = { path = "../../../DuskEVM/L1Contracts/core" }
+dusk-wasm = { path = "../.." }
+
+[dev-dependencies]
+dusk-core = "1.4"
+dusk-vm = { workspace = true, default-features = false }
+evm-core = { path = "../../../DuskEVM/L1Contracts/core" }
+tests-setup = { path = "../../../DuskEVM/L1Contracts/tests" }
+rand = "0.8"
+serde_json = "1"
+# Pin to avoid edition2024 issues (resolved via workspace)
+blake2b_simd = { workspace = true }
+blake3 = { workspace = true }
+constant_time_eq = { workspace = true }
+
+[lib]
+crate-type = ["cdylib"]
