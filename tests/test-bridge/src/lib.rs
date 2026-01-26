@@ -24,9 +24,9 @@ extern crate alloc;
 /// Test bridge contract demonstrating macro features.
 #[dusk_wasm::contract]
 mod test_bridge {
-    use alloc::vec::Vec;
+    use alloc::collections::BTreeMap;
 
-    use dusk_core::abi::{self, ContractId};
+    use dusk_core::abi;
     use evm_core::standard_bridge::events;
     use evm_core::standard_bridge::{
         Deposit, EVMAddress, PendingWithdrawal, SetEVMAddressOrOffset, SetU64, WithdrawalId,
@@ -47,6 +47,8 @@ mod test_bridge {
         finalization_period: u64,
         /// Address of the other bridge.
         other_bridge: EVMAddress,
+        /// Pending withdrawals awaiting finalization.
+        pending_withdrawals: BTreeMap<WithdrawalId, PendingWithdrawal>,
     }
 
     impl TestBridge {
@@ -57,6 +59,7 @@ mod test_bridge {
                 is_paused: false,
                 finalization_period: 100,
                 other_bridge: EVMAddress([0u8; 20]),
+                pending_withdrawals: BTreeMap::new(),
             }
         }
 
@@ -88,25 +91,29 @@ mod test_bridge {
         }
 
         /// Sets a u64 configuration value.
-        pub fn set_u64(&mut self, _value: SetU64) {
-            abi::emit(
-                events::U64Set::FINALIZATION_PERIOD,
-                events::U64Set {
-                    previous: 0,
-                    new: 0,
-                },
-            );
+        pub fn set_u64(&mut self, value: SetU64) {
+            if let SetU64::FinalizationPeriod(new_value) = value {
+                let previous = core::mem::replace(
+                    &mut self.finalization_period,
+                    new_value,
+                );
+                abi::emit(
+                    events::U64Set::FINALIZATION_PERIOD,
+                    events::U64Set { previous, new: new_value },
+                );
+            }
         }
 
         /// Sets an EVM address configuration value.
-        pub fn set_evm_address_or_offset(&mut self, _value: SetEVMAddressOrOffset) {
-            abi::emit(
-                events::EVMAddressOrOffsetSet::OTHER_BRIDGE,
-                events::EVMAddressOrOffsetSet {
-                    previous: EVMAddress::default(),
-                    new: EVMAddress::default(),
-                },
-            );
+        pub fn set_evm_address_or_offset(&mut self, value: SetEVMAddressOrOffset) {
+            if let SetEVMAddressOrOffset::OtherBridge(new_value) = value {
+                let previous =
+                    core::mem::replace(&mut self.other_bridge, new_value);
+                abi::emit(
+                    events::EVMAddressOrOffsetSet::OTHER_BRIDGE,
+                    events::EVMAddressOrOffsetSet { previous, new: new_value },
+                );
+            }
         }
 
         /// Returns the other bridge address.
@@ -115,68 +122,85 @@ mod test_bridge {
         }
 
         /// Deposits funds.
-        pub fn deposit(&mut self, _deposit: Deposit) {
+        pub fn deposit(&mut self, deposit: Deposit) {
+            assert!(!self.is_paused, "bridge is paused");
+
             abi::emit(
                 events::TransactionDeposited::TOPIC,
                 events::TransactionDeposited {
                     from: EVMAddress::default(),
-                    to: EVMAddress::default(),
+                    to: deposit.to,
                     version: [0u8; 32],
-                    opaque_data: Vec::new(),
+                    opaque_data: deposit.extra_data.clone(),
                 },
             );
             abi::emit(
                 events::BridgeInitiated::TOPIC,
                 events::BridgeInitiated {
                     from: None,
-                    to: EVMAddress::default(),
-                    amount: 0,
-                    deposit_fee: 0,
-                    extra_data: Vec::new(),
+                    to: deposit.to,
+                    amount: deposit.amount,
+                    deposit_fee: deposit.fee,
+                    extra_data: deposit.extra_data,
                 },
             );
         }
 
         /// Returns a pending withdrawal.
-        pub fn pending_withdrawal(&self, _id: WithdrawalId) -> Option<PendingWithdrawal> {
-            None
+        pub fn pending_withdrawal(&self, id: WithdrawalId) -> Option<PendingWithdrawal> {
+            self.pending_withdrawals.get(&id).copied()
         }
 
         /// Adds a pending withdrawal.
-        pub fn add_pending_withdrawal(&mut self, _withdrawal: WithdrawalRequest) {
+        pub fn add_pending_withdrawal(&mut self, withdrawal: WithdrawalRequest) {
+            let id = withdrawal.id;
+            let pending: PendingWithdrawal =
+                withdrawal.try_into().expect("invalid withdrawal request");
+
+            self.pending_withdrawals.insert(id, pending);
+
             abi::emit(
                 events::PendingWithdrawal::ADDED,
                 events::PendingWithdrawal {
-                    from: EVMAddress::default(),
-                    to: DSAddress::Contract(ContractId::from_bytes([0u8; 32])),
-                    amount: 0,
-                    block_height: 0,
+                    from: pending.from,
+                    to: pending.to,
+                    amount: pending.amount,
+                    block_height: pending.block_height,
                 },
             );
         }
 
         /// Finalizes a withdrawal.
-        pub fn finalize_withdrawal(&mut self, _id: WithdrawalId) {
+        pub fn finalize_withdrawal(&mut self, id: WithdrawalId) {
+            let pending = self
+                .pending_withdrawals
+                .remove(&id)
+                .expect("withdrawal not found");
+
             abi::emit(
                 events::BridgeFinalized::TOPIC,
                 events::BridgeFinalized {
-                    from: EVMAddress::default(),
-                    to: DSAddress::Contract(ContractId::from_bytes([0u8; 32])),
-                    amount: 0,
+                    from: pending.from,
+                    to: pending.to,
+                    amount: pending.amount,
                 },
             );
         }
-
-        // Private helper - should NOT be exported
-        fn only_owner(&self) {}
     }
 
-    /// OwnableUpgradeable trait implementation.
+    /// `OwnableUpgradeable` trait implementation.
     ///
     /// Demonstrates exposing trait methods as contract functions using
     /// `#[contract(expose = [...])]`. Only the listed methods become
     /// contract functions; `owner_mut` and `only_owner` remain internal.
+    ///
+    /// Note: Empty implementations signal the macro to use trait defaults.
     #[contract(expose = [owner, transfer_ownership, renounce_ownership])]
+    // The `#[contract]` macro requires empty method bodies to signal that
+    // the trait's default implementations should be used. These empty bodies
+    // trigger clippy warnings about unused `self` and pass-by-value parameters,
+    // which we suppress here since the pattern is intentional.
+    #[allow(clippy::unused_self, clippy::needless_pass_by_value)]
     impl OwnableUpgradeable for TestBridge {
         /// Returns the current owner of the contract.
         fn owner(&self) -> Option<DSAddress> {
@@ -189,11 +213,11 @@ mod test_bridge {
         }
 
         /// Transfers ownership to a new address.
-        /// Uses the trait's default implementation which emits an event.
+        /// Empty body signals the macro to use the trait's default implementation.
         fn transfer_ownership(&mut self, new_owner: DSAddress) {}
 
         /// Renounces ownership of the contract.
-        /// Uses the trait's default implementation which emits an event.
+        /// Empty body signals the macro to use the trait's default implementation.
         fn renounce_ownership(&mut self) {}
     }
 }
