@@ -9,11 +9,12 @@ default = ["contract"]
 # Build as contract WASM (includes dusk-core with abi-dlmalloc)
 contract = ["dusk-core/abi-dlmalloc", "evm-core/abi"]
 # Build as data-driver WASM (mutually exclusive with contract)
-data-driver = ["dep:dusk-data-driver", "dusk-data-driver/wasm-export", "evm-core/serde"]
+data-driver = ["dep:dusk-data-driver", "dusk-data-driver/wasm-export", "evm-core/serde", "dep:serde_json"]
 
 [dependencies]
 dusk-data-driver = { version = "0.3", optional = true }
 dusk-core = "1.4"
+serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 evm-core = { path = "../../../DuskEVM/L1Contracts/core" }

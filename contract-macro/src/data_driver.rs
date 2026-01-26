@@ -16,18 +16,22 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 
 use crate::resolve::TypeMap;
-use crate::{EventInfo, FunctionInfo};
+use crate::{CustomDataDriverHandler, DataDriverRole, EventInfo, FunctionInfo};
 
 /// Generate the `data_driver` module at crate root level.
 pub(crate) fn module(
     type_map: &TypeMap,
     functions: &[FunctionInfo],
     events: &[EventInfo],
+    custom_handlers: &[CustomDataDriverHandler],
 ) -> TokenStream2 {
-    let encode_input_arms = generate_encode_input_arms(functions, type_map);
-    let decode_input_arms = generate_decode_input_arms(functions, type_map);
-    let decode_output_arms = generate_decode_output_arms(functions, type_map);
+    let encode_input_arms = generate_encode_input_arms(functions, type_map, custom_handlers);
+    let decode_input_arms = generate_decode_input_arms(functions, type_map, custom_handlers);
+    let decode_output_arms = generate_decode_output_arms(functions, type_map, custom_handlers);
     let decode_event_arms = generate_decode_event_arms(events, type_map);
+
+    // Collect custom handler functions to include in the module
+    let custom_handler_fns: Vec<_> = custom_handlers.iter().map(|h| &h.func).collect();
 
     quote! {
         /// Auto-generated data driver module.
@@ -40,6 +44,9 @@ pub(crate) fn module(
             use alloc::format;
             use alloc::string::String;
             use alloc::vec::Vec;
+
+            // Custom handler functions moved from the contract module
+            #(#custom_handler_fns)*
 
             /// Auto-generated contract driver.
             #[derive(Default)]
@@ -125,8 +132,12 @@ fn get_resolved_type(ty: &TokenStream2, type_map: &TypeMap) -> TokenStream2 {
 }
 
 /// Generate match arms for `encode_input_fn`.
-fn generate_encode_input_arms(functions: &[FunctionInfo], type_map: &TypeMap) -> Vec<TokenStream2> {
-    functions
+fn generate_encode_input_arms(
+    functions: &[FunctionInfo],
+    type_map: &TypeMap,
+    custom_handlers: &[CustomDataDriverHandler],
+) -> Vec<TokenStream2> {
+    let mut arms: Vec<TokenStream2> = functions
         .iter()
         .map(|f| {
             let name_str = f.name.to_string();
@@ -144,12 +155,29 @@ fn generate_encode_input_arms(functions: &[FunctionInfo], type_map: &TypeMap) ->
                 }
             }
         })
-        .collect()
+        .collect();
+
+    // Add custom handler arms
+    for handler in custom_handlers {
+        if handler.role == DataDriverRole::EncodeInput {
+            let fn_name_str = &handler.fn_name;
+            let handler_fn_name = &handler.func.sig.ident;
+            arms.push(quote! {
+                #fn_name_str => #handler_fn_name(json)
+            });
+        }
+    }
+
+    arms
 }
 
 /// Generate match arms for `decode_input_fn`.
-fn generate_decode_input_arms(functions: &[FunctionInfo], type_map: &TypeMap) -> Vec<TokenStream2> {
-    functions
+fn generate_decode_input_arms(
+    functions: &[FunctionInfo],
+    type_map: &TypeMap,
+    custom_handlers: &[CustomDataDriverHandler],
+) -> Vec<TokenStream2> {
+    let mut arms: Vec<TokenStream2> = functions
         .iter()
         .map(|f| {
             let name_str = f.name.to_string();
@@ -167,15 +195,29 @@ fn generate_decode_input_arms(functions: &[FunctionInfo], type_map: &TypeMap) ->
                 }
             }
         })
-        .collect()
+        .collect();
+
+    // Add custom handler arms
+    for handler in custom_handlers {
+        if handler.role == DataDriverRole::DecodeInput {
+            let fn_name_str = &handler.fn_name;
+            let handler_fn_name = &handler.func.sig.ident;
+            arms.push(quote! {
+                #fn_name_str => #handler_fn_name(rkyv)
+            });
+        }
+    }
+
+    arms
 }
 
 /// Generate match arms for `decode_output_fn`.
 fn generate_decode_output_arms(
     functions: &[FunctionInfo],
     type_map: &TypeMap,
+    custom_handlers: &[CustomDataDriverHandler],
 ) -> Vec<TokenStream2> {
-    functions
+    let mut arms: Vec<TokenStream2> = functions
         .iter()
         .map(|f| {
             let name_str = f.name.to_string();
@@ -202,7 +244,20 @@ fn generate_decode_output_arms(
                 }
             }
         })
-        .collect()
+        .collect();
+
+    // Add custom handler arms
+    for handler in custom_handlers {
+        if handler.role == DataDriverRole::DecodeOutput {
+            let fn_name_str = &handler.fn_name;
+            let handler_fn_name = &handler.func.sig.ident;
+            arms.push(quote! {
+                #fn_name_str => #handler_fn_name(rkyv)
+            });
+        }
+    }
+
+    arms
 }
 
 /// Generate match arms for `decode_event`.

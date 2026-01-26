@@ -220,4 +220,41 @@ mod test_bridge {
         /// Empty body signals the macro to use the trait's default implementation.
         fn renounce_ownership(&mut self) {}
     }
+
+    // =========================================================================
+    // Custom data-driver functions
+    // =========================================================================
+    //
+    // These functions are NOT contract methods - they exist only in the data-driver
+    // to provide encoding/decoding utilities for external tools (e.g., web wallets).
+    //
+    // IMPORTANT: These functions are moved into the `data_driver` module during
+    // macro expansion, so they must use fully-qualified paths for types.
+
+    /// Custom encoder for the `extra_data` data-driver function.
+    ///
+    /// This demonstrates custom data-driver functions that only exist in the
+    /// data-driver, not as actual contract methods. This is useful for providing
+    /// encoding/decoding utilities to external tools.
+    #[contract(encode_input = "extra_data")]
+    fn encode_extra_data(json: &str) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error> {
+        // Parse the input JSON as an EVMAddress and return its bytes
+        let addr: evm_core::standard_bridge::EVMAddress = serde_json::from_str(json)?;
+        Ok(addr.0.to_vec())
+    }
+
+    /// Custom decoder for the `extra_data` data-driver function.
+    #[contract(decode_output = "extra_data")]
+    fn decode_extra_data(rkyv: &[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error> {
+        // Decode the bytes as an EVMAddress and return as JSON
+        if rkyv.len() != 20 {
+            return Err(dusk_data_driver::Error::Unsupported(
+                alloc::format!("expected 20 bytes, got {}", rkyv.len()),
+            ));
+        }
+        let mut addr = [0u8; 20];
+        addr.copy_from_slice(rkyv);
+        let evm_addr = evm_core::standard_bridge::EVMAddress(addr);
+        Ok(serde_json::to_value(evm_addr)?)
+    }
 }

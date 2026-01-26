@@ -173,6 +173,48 @@ impl SomeTrait for MyContract {
 }
 ```
 
+### Custom Data-Driver Functions
+
+Sometimes you need data-driver functions that don't correspond to actual contract methods—for example, utility functions for encoding/decoding addresses or other custom serialization. These are "virtual" functions that only exist in the data-driver.
+
+Use the `#[contract(encode_input = "fn_name")]`, `#[contract(decode_input = "fn_name")]`, or `#[contract(decode_output = "fn_name")]` attributes on functions to define custom handlers:
+
+```rust
+#[contract]
+mod my_contract {
+    // ... contract impl ...
+
+    /// Custom encoder for the "extra_data" data-driver function.
+    /// This function is NOT a contract method - it only exists in the data-driver.
+    #[contract(encode_input = "extra_data")]
+    fn encode_extra_data(json: &str) -> Result<Vec<u8>, dusk_data_driver::Error> {
+        let pk: dusk_core::signatures::bls::PublicKey = serde_json::from_str(json)?;
+        Ok(evm_core::standard_bridge::encode_ds_address(pk))
+    }
+
+    /// Custom decoder for the "extra_data" data-driver function.
+    #[contract(decode_output = "extra_data")]
+    fn decode_extra_data(rkyv: &[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error> {
+        let pk = evm_core::standard_bridge::decode_ds_address(rkyv)?;
+        Ok(serde_json::to_value(pk)?)
+    }
+}
+```
+
+**Important:** These handler functions are moved into the generated `data_driver` module during macro expansion, so they must use fully-qualified paths for all types (except those available in the data-driver module like `dusk_data_driver::Error` and `alloc::vec::Vec`).
+
+The macro will:
+1. Remove these functions from the contract module (they're not contract methods)
+2. Move them into the generated `data_driver` module
+3. Generate match arms that call them for the specified function name
+
+Each data-driver function can have up to three handlers:
+- `encode_input`: Called by `encode_input_fn(fn_name, json) -> Vec<u8>`
+- `decode_input`: Called by `decode_input_fn(fn_name, rkyv) -> JsonValue`
+- `decode_output`: Called by `decode_output_fn(fn_name, rkyv) -> JsonValue`
+
+If a handler is not provided for a role, the data-driver will return an "Unsupported" error for that operation.
+
 ## Generated Output
 
 ### 1. Contract Schema

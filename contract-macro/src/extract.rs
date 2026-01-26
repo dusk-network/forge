@@ -15,7 +15,8 @@ use syn::{
 
 use crate::{
     extract_doc_comment, extract_receiver, has_custom_attribute, has_empty_body, parse, validate,
-    ContractData, EmitVisitor, EventInfo, FunctionInfo, ImportInfo, ParameterInfo, TraitImplInfo,
+    ContractData, CustomDataDriverHandler, DataDriverRole, EmitVisitor, EventInfo, FunctionInfo,
+    ImportInfo, ParameterInfo, TraitImplInfo,
 };
 
 /// Extract topic string from the first argument of `abi::emit()`.
@@ -482,6 +483,108 @@ fn trait_impls<'a>(items: &'a [Item], contract_name: &str) -> Vec<TraitImplInfo<
         .collect()
 }
 
+/// Extract custom data-driver handler functions from module items.
+///
+/// Looks for functions with attributes like:
+/// - `#[contract(encode_input = "fn_name")]`
+/// - `#[contract(decode_input = "fn_name")]`
+/// - `#[contract(decode_output = "fn_name")]`
+fn custom_data_driver_handlers(items: &[Item]) -> Vec<CustomDataDriverHandler> {
+    let mut handlers = Vec::new();
+
+    for item in items {
+        let Item::Fn(func) = item else {
+            continue;
+        };
+
+        for attr in &func.attrs {
+            if !attr.path().is_ident("contract") {
+                continue;
+            }
+
+            let Ok(meta) = attr.meta.require_list() else {
+                continue;
+            };
+
+            // Parse: encode_input = "fn_name", decode_input = "fn_name", or decode_output = "fn_name"
+            let tokens = meta.tokens.clone();
+            let mut iter = tokens.into_iter().peekable();
+
+            // Look for role identifier (encode_input, decode_input, decode_output)
+            let Some(proc_macro2::TokenTree::Ident(role_ident)) = iter.next() else {
+                continue;
+            };
+
+            let role = match role_ident.to_string().as_str() {
+                "encode_input" => DataDriverRole::EncodeInput,
+                "decode_input" => DataDriverRole::DecodeInput,
+                "decode_output" => DataDriverRole::DecodeOutput,
+                _ => continue,
+            };
+
+            // Expect "="
+            let Some(proc_macro2::TokenTree::Punct(punct)) = iter.next() else {
+                continue;
+            };
+            if punct.as_char() != '=' {
+                continue;
+            }
+
+            // Expect string literal with function name
+            let Some(proc_macro2::TokenTree::Literal(lit)) = iter.next() else {
+                continue;
+            };
+            let lit_str = lit.to_string();
+            // Remove quotes from the literal
+            let fn_name = lit_str.trim_matches('"').to_string();
+
+            // Clone the function without the contract attribute
+            let mut func_clone = func.clone();
+            func_clone.attrs.retain(|a| !a.path().is_ident("contract"));
+
+            handlers.push(CustomDataDriverHandler {
+                fn_name,
+                role,
+                func: func_clone,
+            });
+        }
+    }
+
+    handlers
+}
+
+/// Check if an item is a custom data-driver handler function.
+///
+/// Returns true if the item has a `#[contract(encode_input = ...)]`,
+/// `#[contract(decode_input = ...)]`, or `#[contract(decode_output = ...)]` attribute.
+pub(crate) fn is_custom_handler(item: &Item) -> bool {
+    let Item::Fn(func) = item else {
+        return false;
+    };
+
+    for attr in &func.attrs {
+        if !attr.path().is_ident("contract") {
+            continue;
+        }
+
+        let Ok(meta) = attr.meta.require_list() else {
+            continue;
+        };
+
+        let tokens = meta.tokens.clone();
+        let mut iter = tokens.into_iter();
+
+        if let Some(proc_macro2::TokenTree::Ident(ident)) = iter.next() {
+            let name = ident.to_string();
+            if name == "encode_input" || name == "decode_input" || name == "decode_output" {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 /// Extract contract data from the module, validating constraints.
 ///
 /// Returns an error if validation fails.
@@ -509,6 +612,7 @@ pub(crate) fn contract_data<'a>(
     validate::init_method(&name, &impl_blocks)?;
 
     let trait_impls = trait_impls(items, &name);
+    let custom_handlers = custom_data_driver_handlers(items);
 
     Ok(ContractData {
         imports,
@@ -516,6 +620,7 @@ pub(crate) fn contract_data<'a>(
         contract_ident: struct_.ident.clone(),
         impl_blocks,
         trait_impls,
+        custom_handlers,
     })
 }
 

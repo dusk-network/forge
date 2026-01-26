@@ -164,3 +164,215 @@ fn print_schema() {
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
     println!("{}", serde_json::to_string_pretty(&schema).unwrap());
 }
+
+/// Helper struct for calling data-driver functions via WASM.
+struct DataDriverWasm {
+    store: Store<()>,
+    instance: Instance,
+}
+
+impl DataDriverWasm {
+    fn new() -> Self {
+        let engine = Engine::default();
+        let module = Module::new(&engine, DATA_DRIVER_WASM).expect("Failed to compile WASM");
+
+        let mut store = Store::new(&engine, ());
+        let instance = Instance::new(&mut store, &module, &[]).expect("Failed to instantiate WASM");
+
+        // Call init() to register the driver
+        let init = instance
+            .get_typed_func::<(), ()>(&mut store, "init")
+            .expect("Failed to get init function");
+        init.call(&mut store, ()).expect("Failed to call init");
+
+        Self { store, instance }
+    }
+
+    /// Call encode_input_fn via the WASM interface.
+    fn encode_input(&mut self, fn_name: &str, json: &str) -> Result<Vec<u8>, String> {
+        let memory = self
+            .instance
+            .get_memory(&mut self.store, "memory")
+            .expect("Failed to get memory");
+
+        // Grow memory if needed
+        let current_pages = memory.size(&self.store);
+        if current_pages < 4 {
+            memory
+                .grow(&mut self.store, 4 - current_pages)
+                .expect("Failed to grow memory");
+        }
+
+        let encode_fn = self
+            .instance
+            .get_typed_func::<(i32, i32, i32, i32, i32, i32), i32>(&mut self.store, "encode_input_fn")
+            .expect("Failed to get encode_input_fn function");
+
+        // Write fn_name to memory
+        let fn_name_offset = 1024;
+        let fn_name_bytes = fn_name.as_bytes();
+        memory.data_mut(&mut self.store)[fn_name_offset..fn_name_offset + fn_name_bytes.len()]
+            .copy_from_slice(fn_name_bytes);
+
+        // Write json to memory
+        let json_offset = fn_name_offset + 256;
+        let json_bytes = json.as_bytes();
+        memory.data_mut(&mut self.store)[json_offset..json_offset + json_bytes.len()]
+            .copy_from_slice(json_bytes);
+
+        // Output buffer
+        let out_offset = json_offset + 4096;
+        let out_size = 4096;
+
+        let result = encode_fn
+            .call(
+                &mut self.store,
+                (
+                    fn_name_offset as i32,
+                    fn_name_bytes.len() as i32,
+                    json_offset as i32,
+                    json_bytes.len() as i32,
+                    out_offset as i32,
+                    out_size as i32,
+                ),
+            )
+            .expect("Failed to call encode_input_fn");
+
+        if result != 0 {
+            // Read error message
+            let data = memory.data(&self.store);
+            let len_bytes = &data[out_offset..out_offset + 4];
+            let len =
+                u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
+            let msg = String::from_utf8_lossy(&data[out_offset + 4..out_offset + 4 + len]);
+            return Err(format!("Error code {result}: {msg}"));
+        }
+
+        // Read successful result (4-byte length prefix + data)
+        let data = memory.data(&self.store);
+        let len_bytes = &data[out_offset..out_offset + 4];
+        let len =
+            u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
+        Ok(data[out_offset + 4..out_offset + 4 + len].to_vec())
+    }
+
+    /// Call decode_output_fn via the WASM interface.
+    fn decode_output(&mut self, fn_name: &str, rkyv: &[u8]) -> Result<serde_json::Value, String> {
+        let memory = self
+            .instance
+            .get_memory(&mut self.store, "memory")
+            .expect("Failed to get memory");
+
+        let decode_fn = self
+            .instance
+            .get_typed_func::<(i32, i32, i32, i32, i32, i32), i32>(
+                &mut self.store,
+                "decode_output_fn",
+            )
+            .expect("Failed to get decode_output_fn function");
+
+        // Write fn_name to memory
+        let fn_name_offset = 1024;
+        let fn_name_bytes = fn_name.as_bytes();
+        memory.data_mut(&mut self.store)[fn_name_offset..fn_name_offset + fn_name_bytes.len()]
+            .copy_from_slice(fn_name_bytes);
+
+        // Write rkyv data to memory
+        let rkyv_offset = fn_name_offset + 256;
+        memory.data_mut(&mut self.store)[rkyv_offset..rkyv_offset + rkyv.len()]
+            .copy_from_slice(rkyv);
+
+        // Output buffer
+        let out_offset = rkyv_offset + 4096;
+        let out_size = 4096;
+
+        let result = decode_fn
+            .call(
+                &mut self.store,
+                (
+                    fn_name_offset as i32,
+                    fn_name_bytes.len() as i32,
+                    rkyv_offset as i32,
+                    rkyv.len() as i32,
+                    out_offset as i32,
+                    out_size as i32,
+                ),
+            )
+            .expect("Failed to call decode_output_fn");
+
+        if result != 0 {
+            // Read error message
+            let data = memory.data(&self.store);
+            let len_bytes = &data[out_offset..out_offset + 4];
+            let len =
+                u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
+            let msg = String::from_utf8_lossy(&data[out_offset + 4..out_offset + 4 + len]);
+            return Err(format!("Error code {result}: {msg}"));
+        }
+
+        // Read successful result (4-byte length prefix + JSON data)
+        let data = memory.data(&self.store);
+        let len_bytes = &data[out_offset..out_offset + 4];
+        let len =
+            u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
+        let json_str = String::from_utf8_lossy(&data[out_offset + 4..out_offset + 4 + len]);
+        serde_json::from_str(&json_str).map_err(|e| e.to_string())
+    }
+}
+
+#[test]
+fn test_custom_data_driver_function_encode() {
+    let mut driver = DataDriverWasm::new();
+
+    // Test encoding an EVMAddress via the custom "extra_data" function
+    // EVMAddress serializes as a hex string
+    let input_json = r#""0x0102030405060708090a0b0c0d0e0f1011121314""#;
+    let encoded = driver
+        .encode_input("extra_data", input_json)
+        .expect("Failed to encode extra_data");
+
+    // The custom encoder returns the raw bytes of the EVMAddress
+    assert_eq!(encoded.len(), 20, "Expected 20 bytes for EVMAddress");
+    assert_eq!(
+        encoded,
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    );
+}
+
+#[test]
+fn test_custom_data_driver_function_decode() {
+    let mut driver = DataDriverWasm::new();
+
+    // Test decoding raw bytes back to EVMAddress via the custom "extra_data" function
+    let rkyv_data: Vec<u8> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    let decoded = driver
+        .decode_output("extra_data", &rkyv_data)
+        .expect("Failed to decode extra_data");
+
+    // The custom decoder returns the EVMAddress as a hex string
+    let expected: serde_json::Value = serde_json::json!("0x0102030405060708090a0B0c0d0e0f1011121314");
+    assert_eq!(decoded, expected);
+}
+
+#[test]
+fn test_custom_data_driver_function_roundtrip() {
+    let mut driver = DataDriverWasm::new();
+
+    // Encode an EVMAddress (hex string format)
+    let original_json = r#""0xaabbccdd00112233445566778899aabbccddeeff""#;
+    let encoded = driver
+        .encode_input("extra_data", original_json)
+        .expect("Failed to encode extra_data");
+
+    // Decode it back
+    let decoded = driver
+        .decode_output("extra_data", &encoded)
+        .expect("Failed to decode extra_data");
+
+    // Verify roundtrip - note: hex output may have different case
+    let decoded_str = decoded.as_str().expect("Expected string");
+    assert_eq!(
+        decoded_str.to_lowercase(),
+        "0xaabbccdd00112233445566778899aabbccddeeff"
+    );
+}

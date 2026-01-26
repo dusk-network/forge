@@ -120,6 +120,27 @@ struct EventInfo {
     data_type: TokenStream2,
 }
 
+/// Which data-driver method a custom handler implements.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DataDriverRole {
+    /// Handles `encode_input_fn` for a data-driver function.
+    EncodeInput,
+    /// Handles `decode_input_fn` for a data-driver function.
+    DecodeInput,
+    /// Handles `decode_output_fn` for a data-driver function.
+    DecodeOutput,
+}
+
+/// Information about a custom data-driver handler function.
+struct CustomDataDriverHandler {
+    /// The data-driver function name this handler is for (e.g., `"extra_data"`).
+    fn_name: String,
+    /// Which role this handler plays.
+    role: DataDriverRole,
+    /// The function item itself (to be moved into `data_driver` module).
+    func: syn::ItemFn,
+}
+
 /// Visitor to find `abi::emit()` calls within function bodies.
 struct EmitVisitor {
     /// Collected events.
@@ -200,6 +221,8 @@ struct ContractData<'a> {
     impl_blocks: Vec<&'a ItemImpl>,
     /// Trait implementations with `#[contract(expose = [...])]` attributes.
     trait_impls: Vec<TraitImplInfo<'a>>,
+    /// Custom data-driver handler functions.
+    custom_handlers: Vec<CustomDataDriverHandler>,
 }
 
 // ============================================================================
@@ -330,6 +353,7 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         contract_ident,
         impl_blocks,
         trait_impls,
+        custom_handlers,
     } = data;
 
     // Extract functions and events from all inherent impl blocks
@@ -370,7 +394,7 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let type_map = resolve::build_type_map(&imports, &functions, &events);
 
     // Generate data_driver module at crate root level (outside contract module)
-    let data_driver = data_driver::module(&type_map, &functions, &events);
+    let data_driver = data_driver::module(&type_map, &functions, &events, &custom_handlers);
 
     // Rebuild the module with stripped contract attributes on methods
     let mod_vis = &module.vis;
@@ -379,6 +403,8 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let new_items: Vec<_> = items
         .iter()
+        // Filter out custom data-driver handler functions (they go in the data_driver module)
+        .filter(|item| !extract::is_custom_handler(item))
         .map(|item| {
             if let Item::Impl(impl_block) = item
                 && let Type::Path(type_path) = &*impl_block.self_ty
