@@ -205,7 +205,17 @@ mod my_contract {
 
 The macro uses the `feeds` type for `decode_output_fn` in the data-driver instead of the return type, allowing clients to correctly decode the streamed data.
 
-**Important:** Without the `feeds` attribute, functions returning `()` generate `Ok(JsonValue::Null)` in the data-driver, which won't decode the fed data correctly.
+#### Compile-Time Validation
+
+The macro validates `feeds` usage and produces helpful error messages:
+
+| Error | Cause |
+|-------|-------|
+| Missing `#[contract(feeds = "Type")]` | Function uses `abi::feed()` but lacks the attribute |
+| Multiple `abi::feed()` calls | Only one feed call site is allowed per function |
+| Tuple mismatch | Attribute specifies tuple type but expression doesn't look like a tuple (or vice versa) |
+
+These checks catch common mistakes at compile time rather than runtime.
 
 ### Custom Data-Driver Functions
 
