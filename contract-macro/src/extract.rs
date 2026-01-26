@@ -15,8 +15,8 @@ use syn::{
 
 use crate::{
     extract_doc_comment, extract_feeds_attribute, extract_receiver, has_custom_attribute,
-    has_empty_body, parse, validate, ContractData, CustomDataDriverHandler, DataDriverRole,
-    EmitVisitor, EventInfo, FunctionInfo, ImportInfo, ParameterInfo, TraitImplInfo,
+    has_empty_body, has_feed_calls, parse, validate, ContractData, CustomDataDriverHandler,
+    DataDriverRole, EmitVisitor, EventInfo, FunctionInfo, ImportInfo, ParameterInfo, TraitImplInfo,
 };
 
 /// Extract topic string from the first argument of `abi::emit()`.
@@ -100,6 +100,18 @@ pub(crate) fn trait_methods(trait_impl: &TraitImplInfo) -> Result<Vec<FunctionIn
             let feed_type = extract_feeds_attribute(&method.attrs);
             let receiver = extract_receiver(method);
 
+            // Validate: if method uses abi::feed(), it must have #[contract(feeds = "Type")]
+            // (only check non-empty bodies since empty bodies delegate to trait defaults)
+            if !is_default_impl && has_feed_calls(method) && feed_type.is_none() {
+                return Err(syn::Error::new_spanned(
+                    &method.sig,
+                    format!(
+                        "method `{name}` uses `abi::feed()` but is missing `#[contract(feeds = \"Type\")]` attribute; \
+                         add the attribute to specify the type being fed for data-driver decoding"
+                    ),
+                ));
+            }
+
             // Extract parameters (name and type)
             let params = parameters(method);
 
@@ -152,7 +164,10 @@ pub(crate) fn trait_methods(trait_impl: &TraitImplInfo) -> Result<Vec<FunctionIn
 ///
 /// Note: The `new` method is skipped because it's a special constructor
 /// used only for initializing the static STATE variable.
-pub(crate) fn public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
+///
+/// Returns an error if a method uses `abi::feed()` but lacks the
+/// `#[contract(feeds = "Type")]` attribute.
+pub(crate) fn public_methods(impl_block: &ItemImpl) -> Result<Vec<FunctionInfo>, syn::Error> {
     let mut functions = Vec::new();
 
     for item in &impl_block.items {
@@ -172,6 +187,17 @@ pub(crate) fn public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
             let is_custom = has_custom_attribute(&method.attrs);
             let feed_type = extract_feeds_attribute(&method.attrs);
             let receiver = extract_receiver(method);
+
+            // Validate: if method uses abi::feed(), it must have #[contract(feeds = "Type")]
+            if has_feed_calls(method) && feed_type.is_none() {
+                return Err(syn::Error::new_spanned(
+                    &method.sig,
+                    format!(
+                        "method `{name}` uses `abi::feed()` but is missing `#[contract(feeds = \"Type\")]` attribute; \
+                         add the attribute to specify the type being fed for data-driver decoding"
+                    ),
+                ));
+            }
 
             // Extract parameters (name and type)
             let params = parameters(method);
@@ -197,7 +223,7 @@ pub(crate) fn public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
         }
     }
 
-    functions
+    Ok(functions)
 }
 
 /// Extract parameter names and types from a method (excluding self).

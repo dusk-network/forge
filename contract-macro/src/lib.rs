@@ -192,6 +192,53 @@ impl<'ast> Visit<'ast> for EmitVisitor {
     }
 }
 
+/// Visitor to detect `abi::feed()` calls within function bodies.
+struct FeedVisitor {
+    /// Whether any `abi::feed()` call was found.
+    has_feed: bool,
+}
+
+impl FeedVisitor {
+    /// Create a new visitor.
+    fn new() -> Self {
+        Self { has_feed: false }
+    }
+}
+
+impl<'ast> Visit<'ast> for FeedVisitor {
+    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
+        // Check if this is an abi::feed() call
+        if let Expr::Path(ExprPath { path, .. }) = &*node.func {
+            let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+
+            // Match abi::feed or just feed
+            let is_feed = matches!(
+                segments
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                ["abi", "feed"] | ["feed"]
+            );
+
+            if is_feed {
+                self.has_feed = true;
+            }
+        }
+
+        // Continue visiting nested expressions
+        syn::visit::visit_expr_call(self, node);
+    }
+}
+
+/// Check if a method body contains `abi::feed()` calls.
+fn has_feed_calls(method: &ImplItemFn) -> bool {
+    use syn::visit::Visit;
+    let mut visitor = FeedVisitor::new();
+    visitor.visit_block(&method.block);
+    visitor.has_feed
+}
+
 /// Result of extracting imports from a use statement.
 struct ImportExtraction {
     /// The extracted imports.
@@ -418,7 +465,10 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut events = Vec::new();
 
     for impl_block in &impl_blocks {
-        functions.extend(extract::public_methods(impl_block));
+        match extract::public_methods(impl_block) {
+            Ok(methods) => functions.extend(methods),
+            Err(e) => return e.to_compile_error().into(),
+        }
         events.extend(extract::emit_calls(impl_block));
     }
 
