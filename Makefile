@@ -8,6 +8,7 @@ test: test-unit test-integration ## Run all tests
 
 test-unit: ## Run unit tests
 	@echo "Running unit tests..."
+	@cargo test -p contract-macro
 	@cargo test --release
 
 test-integration: ## Run integration tests (test-bridge)

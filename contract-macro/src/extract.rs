@@ -871,4 +871,93 @@ mod tests {
         assert!(err.to_string().contains("nonexistent"));
         assert!(err.to_string().contains("not found"));
     }
+
+    // ========================================================================
+    // Feed validation tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_feeds_missing_attribute() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn stream_data(&self) {
+                abi::feed(42u64);
+            }
+        };
+        let name = format_ident!("stream_data");
+        let result = validate_feeds(&method, &name, &None);
+
+        let Err(err) = result else {
+            panic!("expected error for missing feeds attribute");
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("missing"), "error should mention 'missing': {msg}");
+        assert!(msg.contains("feeds"), "error should mention 'feeds': {msg}");
+        assert!(msg.contains("42u64"), "error should show fed expression: {msg}");
+    }
+
+    #[test]
+    fn test_validate_feeds_multiple_calls() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn stream_multiple(&self) {
+                abi::feed(self.items[0]);
+                abi::feed(self.items[1]);
+            }
+        };
+        let name = format_ident!("stream_multiple");
+        let feed_type: TokenStream2 = quote! { u64 };
+        let result = validate_feeds(&method, &name, &Some(feed_type));
+
+        let Err(err) = result else {
+            panic!("expected error for multiple feed calls");
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("multiple"), "error should mention 'multiple': {msg}");
+        assert!(msg.contains("abi::feed()"), "error should mention 'abi::feed()': {msg}");
+    }
+
+    #[test]
+    fn test_validate_feeds_tuple_mismatch() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn stream_mismatch(&self) {
+                abi::feed(42u64);
+            }
+        };
+        let name = format_ident!("stream_mismatch");
+        let feed_type: TokenStream2 = quote! { (u64, u64) };
+        let result = validate_feeds(&method, &name, &Some(feed_type));
+
+        let Err(err) = result else {
+            panic!("expected error for tuple mismatch");
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("tuple"), "error should mention 'tuple': {msg}");
+        assert!(msg.contains("42u64"), "error should show fed expression: {msg}");
+    }
+
+    #[test]
+    fn test_validate_feeds_valid_with_attribute() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn stream_valid(&self) {
+                abi::feed(42u64);
+            }
+        };
+        let name = format_ident!("stream_valid");
+        let feed_type: TokenStream2 = quote! { u64 };
+        let result = validate_feeds(&method, &name, &Some(feed_type));
+
+        assert!(result.is_ok(), "valid feeds usage should not error");
+    }
+
+    #[test]
+    fn test_validate_feeds_no_feed_no_attribute() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn regular_method(&self) -> u64 {
+                42
+            }
+        };
+        let name = format_ident!("regular_method");
+        let result = validate_feeds(&method, &name, &None);
+
+        assert!(result.is_ok(), "method without abi::feed() should not require attribute");
+    }
 }
