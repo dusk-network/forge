@@ -245,6 +245,38 @@ fn get_feed_exprs(method: &ImplItemFn) -> Vec<String> {
     visitor.feed_exprs
 }
 
+/// Check if a type string looks like a tuple (starts with `(` and contains `,`).
+fn looks_like_tuple(s: &str) -> bool {
+    let trimmed = s.trim();
+    trimmed.starts_with('(') && trimmed.contains(',')
+}
+
+/// Validate that the `feeds` attribute type matches the fed expressions.
+/// Returns an error message if there's a mismatch, None if OK.
+fn validate_feed_type_match(feed_type_str: &str, feed_exprs: &[String]) -> Option<String> {
+    if feed_exprs.is_empty() {
+        return None;
+    }
+
+    let feeds_is_tuple = looks_like_tuple(feed_type_str);
+
+    // Check the first fed expression (they should all be the same type in practice)
+    let expr = &feed_exprs[0];
+    let expr_is_tuple = looks_like_tuple(expr);
+
+    if feeds_is_tuple && !expr_is_tuple {
+        Some(format!(
+            "feeds attribute specifies tuple type `{feed_type_str}` but expression `{expr}` doesn't look like a tuple"
+        ))
+    } else if !feeds_is_tuple && expr_is_tuple {
+        Some(format!(
+            "feeds attribute specifies non-tuple type `{feed_type_str}` but expression `{expr}` looks like a tuple"
+        ))
+    } else {
+        None
+    }
+}
+
 /// Result of extracting imports from a use statement.
 struct ImportExtraction {
     /// The extracted imports.

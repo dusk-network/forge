@@ -6,7 +6,7 @@
 
 //! Extraction functions for contract metadata.
 
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{
     Attribute, Expr, ExprLit, FnArg, ImplItem, ImplItemFn, Item, ItemImpl, ItemMod, Lit, Pat,
@@ -15,9 +15,48 @@ use syn::{
 
 use crate::{
     extract_doc_comment, extract_feeds_attribute, extract_receiver, get_feed_exprs,
-    has_custom_attribute, has_empty_body, parse, validate, ContractData, CustomDataDriverHandler,
-    DataDriverRole, EmitVisitor, EventInfo, FunctionInfo, ImportInfo, ParameterInfo, TraitImplInfo,
+    has_custom_attribute, has_empty_body, parse, validate, validate_feed_type_match, ContractData,
+    CustomDataDriverHandler, DataDriverRole, EmitVisitor, EventInfo, FunctionInfo, ImportInfo,
+    ParameterInfo, TraitImplInfo,
 };
+
+/// Validate feed-related attributes for a method.
+///
+/// Checks that:
+/// 1. If `abi::feed()` is used, the `#[contract(feeds = "Type")]` attribute is present
+/// 2. If present, the feeds type matches the fed expression (tuple vs non-tuple)
+///
+/// Returns an error if validation fails.
+fn validate_feeds(
+    method: &ImplItemFn,
+    name: &Ident,
+    feed_type: &Option<TokenStream2>,
+) -> Result<(), syn::Error> {
+    let feed_exprs = get_feed_exprs(method);
+
+    if let Some(ref ft) = feed_type {
+        // Has feeds attribute - validate it matches the expressions
+        if let Some(mismatch_msg) = validate_feed_type_match(&ft.to_string(), &feed_exprs) {
+            return Err(syn::Error::new_spanned(&method.sig, mismatch_msg));
+        }
+    } else if !feed_exprs.is_empty() {
+        // Uses abi::feed() but missing feeds attribute
+        let exprs_hint = if feed_exprs.len() == 1 {
+            format!("feeds: `{}`", feed_exprs[0])
+        } else {
+            format!("feeds: {}", feed_exprs.join(", "))
+        };
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            format!(
+                "method `{name}` uses `abi::feed()` but is missing `#[contract(feeds = \"Type\")]` attribute; \
+                 {exprs_hint}"
+            ),
+        ));
+    }
+
+    Ok(())
+}
 
 /// Extract topic string from the first argument of `abi::emit()`.
 /// Handles both string literals and const path expressions.
@@ -100,24 +139,10 @@ pub(crate) fn trait_methods(trait_impl: &TraitImplInfo) -> Result<Vec<FunctionIn
             let feed_type = extract_feeds_attribute(&method.attrs);
             let receiver = extract_receiver(method);
 
-            // Validate: if method uses abi::feed(), it must have #[contract(feeds = "Type")]
+            // Validate feed-related attributes
             // (only check non-empty bodies since empty bodies delegate to trait defaults)
-            if !is_default_impl && feed_type.is_none() {
-                let feed_exprs = get_feed_exprs(method);
-                if !feed_exprs.is_empty() {
-                    let exprs_hint = if feed_exprs.len() == 1 {
-                        format!("feeds: `{}`", feed_exprs[0])
-                    } else {
-                        format!("feeds: {}", feed_exprs.join(", "))
-                    };
-                    return Err(syn::Error::new_spanned(
-                        &method.sig,
-                        format!(
-                            "method `{name}` uses `abi::feed()` but is missing `#[contract(feeds = \"Type\")]` attribute; \
-                             {exprs_hint}"
-                        ),
-                    ));
-                }
+            if !is_default_impl {
+                validate_feeds(method, &name, &feed_type)?;
             }
 
             // Extract parameters (name and type)
@@ -196,24 +221,8 @@ pub(crate) fn public_methods(impl_block: &ItemImpl) -> Result<Vec<FunctionInfo>,
             let feed_type = extract_feeds_attribute(&method.attrs);
             let receiver = extract_receiver(method);
 
-            // Validate: if method uses abi::feed(), it must have #[contract(feeds = "Type")]
-            if feed_type.is_none() {
-                let feed_exprs = get_feed_exprs(method);
-                if !feed_exprs.is_empty() {
-                    let exprs_hint = if feed_exprs.len() == 1 {
-                        format!("feeds: `{}`", feed_exprs[0])
-                    } else {
-                        format!("feeds: {}", feed_exprs.join(", "))
-                    };
-                    return Err(syn::Error::new_spanned(
-                        &method.sig,
-                        format!(
-                            "method `{name}` uses `abi::feed()` but is missing `#[contract(feeds = \"Type\")]` attribute; \
-                             {exprs_hint}"
-                        ),
-                    ));
-                }
-            }
+            // Validate feed-related attributes
+            validate_feeds(method, &name, &feed_type)?;
 
             // Extract parameters (name and type)
             let params = parameters(method);
