@@ -14,8 +14,8 @@ use syn::{
 };
 
 use crate::{
-    extract_doc_comment, extract_feeds_attribute, extract_receiver, has_custom_attribute,
-    has_empty_body, has_feed_calls, parse, validate, ContractData, CustomDataDriverHandler,
+    extract_doc_comment, extract_feeds_attribute, extract_receiver, get_feed_exprs,
+    has_custom_attribute, has_empty_body, parse, validate, ContractData, CustomDataDriverHandler,
     DataDriverRole, EmitVisitor, EventInfo, FunctionInfo, ImportInfo, ParameterInfo, TraitImplInfo,
 };
 
@@ -102,14 +102,22 @@ pub(crate) fn trait_methods(trait_impl: &TraitImplInfo) -> Result<Vec<FunctionIn
 
             // Validate: if method uses abi::feed(), it must have #[contract(feeds = "Type")]
             // (only check non-empty bodies since empty bodies delegate to trait defaults)
-            if !is_default_impl && has_feed_calls(method) && feed_type.is_none() {
-                return Err(syn::Error::new_spanned(
-                    &method.sig,
-                    format!(
-                        "method `{name}` uses `abi::feed()` but is missing `#[contract(feeds = \"Type\")]` attribute; \
-                         add the attribute to specify the type being fed for data-driver decoding"
-                    ),
-                ));
+            if !is_default_impl && feed_type.is_none() {
+                let feed_exprs = get_feed_exprs(method);
+                if !feed_exprs.is_empty() {
+                    let exprs_hint = if feed_exprs.len() == 1 {
+                        format!("feeds: `{}`", feed_exprs[0])
+                    } else {
+                        format!("feeds: {}", feed_exprs.join(", "))
+                    };
+                    return Err(syn::Error::new_spanned(
+                        &method.sig,
+                        format!(
+                            "method `{name}` uses `abi::feed()` but is missing `#[contract(feeds = \"Type\")]` attribute; \
+                             {exprs_hint}"
+                        ),
+                    ));
+                }
             }
 
             // Extract parameters (name and type)
@@ -189,14 +197,22 @@ pub(crate) fn public_methods(impl_block: &ItemImpl) -> Result<Vec<FunctionInfo>,
             let receiver = extract_receiver(method);
 
             // Validate: if method uses abi::feed(), it must have #[contract(feeds = "Type")]
-            if has_feed_calls(method) && feed_type.is_none() {
-                return Err(syn::Error::new_spanned(
-                    &method.sig,
-                    format!(
-                        "method `{name}` uses `abi::feed()` but is missing `#[contract(feeds = \"Type\")]` attribute; \
-                         add the attribute to specify the type being fed for data-driver decoding"
-                    ),
-                ));
+            if feed_type.is_none() {
+                let feed_exprs = get_feed_exprs(method);
+                if !feed_exprs.is_empty() {
+                    let exprs_hint = if feed_exprs.len() == 1 {
+                        format!("feeds: `{}`", feed_exprs[0])
+                    } else {
+                        format!("feeds: {}", feed_exprs.join(", "))
+                    };
+                    return Err(syn::Error::new_spanned(
+                        &method.sig,
+                        format!(
+                            "method `{name}` uses `abi::feed()` but is missing `#[contract(feeds = \"Type\")]` attribute; \
+                             {exprs_hint}"
+                        ),
+                    ));
+                }
             }
 
             // Extract parameters (name and type)

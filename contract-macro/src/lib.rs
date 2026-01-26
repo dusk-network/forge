@@ -194,14 +194,16 @@ impl<'ast> Visit<'ast> for EmitVisitor {
 
 /// Visitor to detect `abi::feed()` calls within function bodies.
 struct FeedVisitor {
-    /// Whether any `abi::feed()` call was found.
-    has_feed: bool,
+    /// The expressions passed to `abi::feed()` calls, as strings.
+    feed_exprs: Vec<String>,
 }
 
 impl FeedVisitor {
     /// Create a new visitor.
     fn new() -> Self {
-        Self { has_feed: false }
+        Self {
+            feed_exprs: Vec::new(),
+        }
     }
 }
 
@@ -221,8 +223,11 @@ impl<'ast> Visit<'ast> for FeedVisitor {
                 ["abi", "feed"] | ["feed"]
             );
 
-            if is_feed {
-                self.has_feed = true;
+            if is_feed && !node.args.is_empty() {
+                // Capture the expression being fed
+                let expr = &node.args[0];
+                let expr_str = quote!(#expr).to_string();
+                self.feed_exprs.push(expr_str);
             }
         }
 
@@ -232,11 +237,12 @@ impl<'ast> Visit<'ast> for FeedVisitor {
 }
 
 /// Check if a method body contains `abi::feed()` calls.
-fn has_feed_calls(method: &ImplItemFn) -> bool {
+/// Returns the expressions being fed (empty if no feed calls).
+fn get_feed_exprs(method: &ImplItemFn) -> Vec<String> {
     use syn::visit::Visit;
     let mut visitor = FeedVisitor::new();
     visitor.visit_block(&method.block);
-    visitor.has_feed
+    visitor.feed_exprs
 }
 
 /// Result of extracting imports from a use statement.
