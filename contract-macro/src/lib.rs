@@ -110,6 +110,9 @@ struct FunctionInfo {
     receiver: Receiver,
     /// For trait methods with empty bodies: the trait name to call the default impl.
     trait_name: Option<String>,
+    /// The type fed via `abi::feed()` for streaming functions (from `#[contract(feeds = "Type")]`).
+    /// When present, the data-driver uses this type for `decode_output_fn` instead of `output_type`.
+    feed_type: Option<TokenStream2>,
 }
 
 /// Information about an event extracted from `abi::emit()` calls.
@@ -291,6 +294,60 @@ fn has_custom_attribute(attrs: &[Attribute]) -> bool {
         }
         false
     })
+}
+
+/// Extract the `feeds` type from a `#[contract(feeds = "Type")]` attribute.
+///
+/// This attribute specifies the type fed via `abi::feed()` for streaming functions.
+/// When present, the data-driver uses this type for `decode_output_fn` instead of the
+/// function's return type.
+///
+/// Returns `Some(TokenStream2)` with the feed type if found, `None` otherwise.
+fn extract_feeds_attribute(attrs: &[Attribute]) -> Option<TokenStream2> {
+    for attr in attrs {
+        if !attr.path().is_ident("contract") {
+            continue;
+        }
+
+        let Ok(meta) = attr.meta.require_list() else {
+            continue;
+        };
+
+        // Parse: feeds = "Type"
+        let tokens = meta.tokens.clone();
+        let mut iter = tokens.into_iter().peekable();
+
+        // Look for "feeds"
+        let Some(proc_macro2::TokenTree::Ident(ident)) = iter.next() else {
+            continue;
+        };
+        if ident != "feeds" {
+            continue;
+        }
+
+        // Expect "="
+        let Some(proc_macro2::TokenTree::Punct(punct)) = iter.next() else {
+            continue;
+        };
+        if punct.as_char() != '=' {
+            continue;
+        }
+
+        // Expect string literal with type
+        let Some(proc_macro2::TokenTree::Literal(lit)) = iter.next() else {
+            continue;
+        };
+        let lit_str = lit.to_string();
+        // Remove quotes from the literal
+        let type_str = lit_str.trim_matches('"');
+
+        // Parse the type string into tokens
+        if let Ok(ty) = syn::parse_str::<syn::Type>(type_str) {
+            return Some(quote! { #ty });
+        }
+    }
+
+    None
 }
 
 /// Generate the argument expression for passing to the method.

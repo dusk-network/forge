@@ -212,6 +212,10 @@ fn generate_decode_input_arms(
 }
 
 /// Generate match arms for `decode_output_fn`.
+///
+/// When a function has a `feed_type` (from `#[contract(feeds = "Type")]`),
+/// that type is used for decoding instead of the return type. This handles
+/// functions that stream data via `abi::feed()` rather than returning directly.
 fn generate_decode_output_arms(
     functions: &[FunctionInfo],
     type_map: &TypeMap,
@@ -221,8 +225,13 @@ fn generate_decode_output_arms(
         .iter()
         .map(|f| {
             let name_str = f.name.to_string();
-            let output_type = get_resolved_type(&f.output_type, type_map);
-            let output_str = f.output_type.to_string();
+
+            // Use feed_type if present, otherwise use output_type
+            let (decode_type, type_str) = if let Some(feed_type) = &f.feed_type {
+                (get_resolved_type(feed_type, type_map), feed_type.to_string())
+            } else {
+                (get_resolved_type(&f.output_type, type_map), f.output_type.to_string())
+            };
 
             if f.is_custom {
                 quote! {
@@ -230,17 +239,17 @@ fn generate_decode_output_arms(
                         alloc::format!("custom handler required: {}", #name_str)
                     ))
                 }
-            } else if output_str == "()" {
+            } else if type_str == "()" {
                 quote! {
                     #name_str => Ok(dusk_data_driver::JsonValue::Null)
                 }
-            } else if output_str == "u64" {
+            } else if type_str == "u64" {
                 quote! {
                     #name_str => dusk_data_driver::rkyv_to_json_u64(rkyv)
                 }
             } else {
                 quote! {
-                    #name_str => dusk_data_driver::rkyv_to_json::<#output_type>(rkyv)
+                    #name_str => dusk_data_driver::rkyv_to_json::<#decode_type>(rkyv)
                 }
             }
         })
@@ -325,6 +334,7 @@ mod tests {
             returns_ref: false,
             receiver: Receiver::Ref,
             trait_name: None,
+            feed_type: None,
         }
     }
 
@@ -866,6 +876,129 @@ mod tests {
         assert!(arm_str.contains("\"extra_data\""));
         assert!(arm_str.contains("decode_extra_output"));
         assert!(arm_str.contains("(rkyv)"));
+    }
+
+    // =========================================================================
+    // feed_type tests (for functions using abi::feed)
+    // =========================================================================
+
+    /// Helper to create a FunctionInfo with a feed_type.
+    fn make_function_with_feed(
+        name: &str,
+        input: TokenStream2,
+        output: TokenStream2,
+        feed: TokenStream2,
+    ) -> FunctionInfo {
+        FunctionInfo {
+            name: format_ident!("{}", name),
+            doc: None,
+            params: vec![],
+            input_type: input,
+            output_type: output,
+            is_custom: false,
+            returns_ref: false,
+            receiver: Receiver::Ref,
+            trait_name: None,
+            feed_type: Some(feed),
+        }
+    }
+
+    #[test]
+    fn test_decode_output_uses_feed_type_instead_of_output_type() {
+        let mut type_map = HashMap::new();
+        type_map.insert(
+            "(WithdrawalId , PendingWithdrawal)".to_string(),
+            "(evm_core::WithdrawalId, evm_core::PendingWithdrawal)".to_string(),
+        );
+
+        // Function returns () but feeds (WithdrawalId, PendingWithdrawal)
+        let functions = vec![make_function_with_feed(
+            "pending_withdrawals",
+            quote! { () },
+            quote! { () },
+            quote! { (WithdrawalId, PendingWithdrawal) },
+        )];
+        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
+
+        assert_eq!(arms.len(), 1);
+        let arm_str = normalize_tokens(arms[0].clone());
+        assert!(arm_str.contains("\"pending_withdrawals\""));
+        // Should use the feed type, not return JsonValue::Null
+        assert!(
+            !arm_str.contains("JsonValue :: Null"),
+            "Should NOT return Null when feed_type is present: {}",
+            arm_str
+        );
+        assert!(
+            arm_str.contains("rkyv_to_json"),
+            "Should use rkyv_to_json with feed type: {}",
+            arm_str
+        );
+        assert!(
+            arm_str.contains("evm_core :: WithdrawalId"),
+            "Should use resolved feed type: {}",
+            arm_str
+        );
+    }
+
+    #[test]
+    fn test_decode_output_feed_type_simple() {
+        let mut type_map = HashMap::new();
+        type_map.insert("WithdrawalId".to_string(), "evm_core::WithdrawalId".to_string());
+
+        // Function returns () but feeds WithdrawalId
+        let functions = vec![make_function_with_feed(
+            "finalized_withdrawals",
+            quote! { () },
+            quote! { () },
+            quote! { WithdrawalId },
+        )];
+        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
+
+        assert_eq!(arms.len(), 1);
+        let arm_str = normalize_tokens(arms[0].clone());
+        assert!(arm_str.contains("\"finalized_withdrawals\""));
+        assert!(
+            arm_str.contains("evm_core :: WithdrawalId"),
+            "Should use resolved feed type: {}",
+            arm_str
+        );
+    }
+
+    #[test]
+    fn test_decode_output_no_feed_type_uses_output_type() {
+        let type_map = HashMap::new();
+
+        // Function without feed_type should use output_type as before
+        let functions = vec![make_function("is_paused", quote! { () }, quote! { bool }, false)];
+        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
+
+        assert_eq!(arms.len(), 1);
+        let arm_str = normalize_tokens(arms[0].clone());
+        assert!(arm_str.contains("rkyv_to_json :: < bool >"));
+    }
+
+    #[test]
+    fn test_decode_output_feed_type_u64_uses_special_handler() {
+        let type_map = HashMap::new();
+
+        // Function that feeds u64 should still use the special rkyv_to_json_u64
+        let functions = vec![make_function_with_feed(
+            "get_count",
+            quote! { () },
+            quote! { () },
+            quote! { u64 },
+        )];
+        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
+
+        assert_eq!(arms.len(), 1);
+        let arm_str = normalize_tokens(arms[0].clone());
+        assert!(arm_str.contains("\"get_count\""));
+        assert!(
+            arm_str.contains("rkyv_to_json_u64"),
+            "u64 feed_type should use rkyv_to_json_u64: {}",
+            arm_str
+        );
     }
 
     // =========================================================================

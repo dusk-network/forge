@@ -175,7 +175,7 @@ pub(crate) fn build_type_map(
     let import_map = build_import_map(imports);
     let mut type_map = TypeMap::new();
 
-    // Resolve function input and output types
+    // Resolve function input, output, and feed types
     for func in functions {
         let input_key = func.input_type.to_string();
         let input_resolved = resolve_type(&func.input_type, &import_map);
@@ -184,6 +184,13 @@ pub(crate) fn build_type_map(
         let output_key = func.output_type.to_string();
         let output_resolved = resolve_type(&func.output_type, &import_map);
         type_map.insert(output_key, output_resolved);
+
+        // Resolve feed_type if present (from #[contract(feeds = "Type")])
+        if let Some(feed_type) = &func.feed_type {
+            let feed_key = feed_type.to_string();
+            let feed_resolved = resolve_type(feed_type, &import_map);
+            type_map.insert(feed_key, feed_resolved);
+        }
     }
 
     // Resolve event data types and topic paths

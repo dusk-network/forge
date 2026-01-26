@@ -14,9 +14,9 @@ use syn::{
 };
 
 use crate::{
-    extract_doc_comment, extract_receiver, has_custom_attribute, has_empty_body, parse, validate,
-    ContractData, CustomDataDriverHandler, DataDriverRole, EmitVisitor, EventInfo, FunctionInfo,
-    ImportInfo, ParameterInfo, TraitImplInfo,
+    extract_doc_comment, extract_feeds_attribute, extract_receiver, has_custom_attribute,
+    has_empty_body, parse, validate, ContractData, CustomDataDriverHandler, DataDriverRole,
+    EmitVisitor, EventInfo, FunctionInfo, ImportInfo, ParameterInfo, TraitImplInfo,
 };
 
 /// Extract topic string from the first argument of `abi::emit()`.
@@ -97,6 +97,7 @@ pub(crate) fn trait_methods(trait_impl: &TraitImplInfo) -> Result<Vec<FunctionIn
             let name = method.sig.ident.clone();
             let doc = extract_doc_comment(&method.attrs);
             let is_custom = has_custom_attribute(&method.attrs);
+            let feed_type = extract_feeds_attribute(&method.attrs);
             let receiver = extract_receiver(method);
 
             // Extract parameters (name and type)
@@ -125,6 +126,7 @@ pub(crate) fn trait_methods(trait_impl: &TraitImplInfo) -> Result<Vec<FunctionIn
                 returns_ref,
                 receiver,
                 trait_name,
+                feed_type,
             });
         }
     }
@@ -168,6 +170,7 @@ pub(crate) fn public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
             let name = method.sig.ident.clone();
             let doc = extract_doc_comment(&method.attrs);
             let is_custom = has_custom_attribute(&method.attrs);
+            let feed_type = extract_feeds_attribute(&method.attrs);
             let receiver = extract_receiver(method);
 
             // Extract parameters (name and type)
@@ -189,6 +192,7 @@ pub(crate) fn public_methods(impl_block: &ItemImpl) -> Vec<FunctionInfo> {
                 returns_ref,
                 receiver,
                 trait_name: None, // Not a trait method
+                feed_type,
             });
         }
     }

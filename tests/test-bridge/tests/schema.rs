@@ -376,3 +376,134 @@ fn test_custom_data_driver_function_roundtrip() {
         "0xaabbccdd00112233445566778899aabbccddeeff"
     );
 }
+
+// =============================================================================
+// Tests for #[contract(feeds = "Type")] attribute
+// =============================================================================
+
+#[test]
+fn test_schema_has_feed_functions() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let fn_names: Vec<&str> = functions
+        .iter()
+        .map(|f| f["name"].as_str().unwrap())
+        .collect();
+
+    // Check streaming functions are present
+    assert!(
+        fn_names.contains(&"pending_withdrawals"),
+        "missing pending_withdrawals"
+    );
+    assert!(
+        fn_names.contains(&"pending_withdrawal_ids"),
+        "missing pending_withdrawal_ids"
+    );
+
+    // Verify the schema shows () as output (the Rust return type)
+    let pending_withdrawals_fn = functions
+        .iter()
+        .find(|f| f["name"] == "pending_withdrawals")
+        .expect("pending_withdrawals not found");
+    assert_eq!(
+        pending_withdrawals_fn["output"].as_str().unwrap(),
+        "()",
+        "pending_withdrawals should have () as output in schema"
+    );
+}
+
+#[test]
+fn test_feed_function_decode_uses_feed_type() {
+    use dusk_core::abi::ContractId;
+    use evm_core::standard_bridge::{EVMAddress, PendingWithdrawal, WithdrawalId};
+    use evm_core::Address as DSAddress;
+
+    let mut driver = DataDriverWasm::new();
+
+    // Create test data: (WithdrawalId, PendingWithdrawal) tuple
+    let withdrawal_id = WithdrawalId([1u8; 32]);
+    // Create a DSAddress using a ContractId (32-byte array)
+    let contract_id = ContractId::from_bytes([3u8; 32]);
+    let pending = PendingWithdrawal {
+        from: EVMAddress([2u8; 20]),
+        to: DSAddress::Contract(contract_id),
+        amount: 1000,
+        block_height: 42,
+    };
+
+    // Serialize the tuple using rkyv
+    let rkyv_data = rkyv::to_bytes::<_, 256>(&(withdrawal_id, pending))
+        .expect("Failed to serialize tuple");
+
+    // Decode using the data-driver
+    // This should use the feed_type "(WithdrawalId, PendingWithdrawal)", NOT return null
+    let decoded = driver
+        .decode_output("pending_withdrawals", &rkyv_data)
+        .expect("Failed to decode pending_withdrawals output");
+
+    // Verify we got an array (tuple serializes as array in JSON)
+    assert!(
+        decoded.is_array(),
+        "Expected array (tuple), got: {decoded:?}"
+    );
+
+    let arr = decoded.as_array().unwrap();
+    assert_eq!(arr.len(), 2, "Expected 2-element tuple");
+
+    // First element is WithdrawalId - may serialize as hex string or array depending on serde impl
+    // Just verify it exists and is not null
+    assert!(
+        !arr[0].is_null(),
+        "First element (WithdrawalId) should not be null: {decoded:?}"
+    );
+
+    // Second element is PendingWithdrawal struct
+    assert!(arr[1].is_object(), "Second element should be PendingWithdrawal object");
+    assert!(arr[1]["amount"].is_number(), "PendingWithdrawal should have amount field");
+    assert_eq!(arr[1]["amount"], 1000);
+    assert_eq!(arr[1]["block_height"], 42);
+}
+
+#[test]
+fn test_feed_function_simple_type_decode() {
+    use evm_core::standard_bridge::WithdrawalId;
+
+    let mut driver = DataDriverWasm::new();
+
+    // Create test data: just a WithdrawalId
+    let withdrawal_id = WithdrawalId([3u8; 32]);
+
+    // Serialize using rkyv
+    let rkyv_data = rkyv::to_bytes::<_, 256>(&withdrawal_id)
+        .expect("Failed to serialize WithdrawalId");
+
+    // Decode using the data-driver
+    // This should use the feed_type "WithdrawalId", NOT return null
+    let decoded = driver
+        .decode_output("pending_withdrawal_ids", &rkyv_data)
+        .expect("Failed to decode pending_withdrawal_ids output");
+
+    // WithdrawalId serializes as a hex string with serde
+    // The key assertion is that it's NOT null (which would happen without the feeds attribute)
+    assert!(
+        !decoded.is_null(),
+        "Expected non-null WithdrawalId, got null. The feeds attribute is not working!"
+    );
+
+    // If it's a string, verify it contains the expected hex pattern
+    if let Some(s) = decoded.as_str() {
+        // 32 bytes of 0x03 -> "0303...03" (64 hex chars)
+        assert!(
+            s.len() >= 64,
+            "Expected hex string of at least 64 chars, got: {s}"
+        );
+        assert!(
+            s.chars().all(|c| c.is_ascii_hexdigit()),
+            "Expected hex string, got: {s}"
+        );
+    }
+    // Could also be an array depending on serialization - just verify it exists
+}

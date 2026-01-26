@@ -186,6 +186,36 @@ mod test_bridge {
                 },
             );
         }
+
+        // =====================================================================
+        // Streaming functions (using abi::feed)
+        // =====================================================================
+        //
+        // These functions demonstrate the `#[contract(feeds = "Type")]` attribute
+        // for functions that stream data to the host via `abi::feed()` instead of
+        // returning a value directly.
+
+        /// Feeds all pending withdrawals to the host.
+        ///
+        /// This function streams `(WithdrawalId, PendingWithdrawal)` tuples to the
+        /// host one at a time. The `feeds` attribute tells the data-driver what
+        /// type to use for decoding the output.
+        #[contract(feeds = "(WithdrawalId, PendingWithdrawal)")]
+        pub fn pending_withdrawals(&self) {
+            for (id, pending) in &self.pending_withdrawals {
+                abi::feed((*id, *pending));
+            }
+        }
+
+        /// Feeds all pending withdrawal IDs to the host.
+        ///
+        /// This is a simpler example that feeds just the `WithdrawalId`.
+        #[contract(feeds = "WithdrawalId")]
+        pub fn pending_withdrawal_ids(&self) {
+            for id in self.pending_withdrawals.keys() {
+                abi::feed(*id);
+            }
+        }
     }
 
     /// `OwnableUpgradeable` trait implementation.

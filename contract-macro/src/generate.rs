@@ -267,6 +267,7 @@ mod tests {
             returns_ref: false,
             receiver: Receiver::Ref,
             trait_name: None,
+            feed_type: None,
         }];
 
         let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));
@@ -304,6 +305,7 @@ mod tests {
             returns_ref: false,
             receiver: Receiver::RefMut,
             trait_name: None,
+            feed_type: None,
         }];
 
         let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));
@@ -349,6 +351,7 @@ mod tests {
             returns_ref: false,
             receiver: Receiver::RefMut,
             trait_name: None,
+            feed_type: None,
         }];
 
         let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));
@@ -382,6 +385,7 @@ mod tests {
                 returns_ref: false,
                 receiver: Receiver::RefMut,
                 trait_name: None,
+                feed_type: None,
             },
             FunctionInfo {
                 name: format_ident!("unpause"),
@@ -393,6 +397,7 @@ mod tests {
                 returns_ref: false,
                 receiver: Receiver::RefMut,
                 trait_name: None,
+                feed_type: None,
             },
         ];
 
@@ -431,6 +436,7 @@ mod tests {
             returns_ref: true,
             receiver: Receiver::Ref,
             trait_name: None,
+            feed_type: None,
         }];
 
         let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));
@@ -468,6 +474,7 @@ mod tests {
             returns_ref: false,
             receiver: Receiver::RefMut,
             trait_name: None,
+            feed_type: None,
         }];
 
         let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));
@@ -505,6 +512,7 @@ mod tests {
             returns_ref: false,
             receiver: Receiver::RefMut,
             trait_name: None,
+            feed_type: None,
         }];
 
         let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));

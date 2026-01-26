@@ -26,6 +26,7 @@ dusk-vm = { workspace = true, default-features = false }
 evm-core = { path = "../../../DuskEVM/L1Contracts/core" }
 tests-setup = { path = "../../../DuskEVM/L1Contracts/tests" }
 rand = "0.8"
+rkyv = { version = "0.7", default-features = false, features = ["alloc", "size_32"] }
 serde_json = "1"
 wasmtime = "25"
 # Pin to avoid edition2024 issues (resolved via workspace)

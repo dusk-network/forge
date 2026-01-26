@@ -158,6 +158,7 @@ The macro analyzes the contract module and extracts metadata:
 | Return type | Output type (`()` if none) |
 | `abi::emit(topic, data)` | Event emission |
 | `#[contract(custom)]` | Requires manual encode/decode in data-driver |
+| `#[contract(feeds = "Type")]` | Specifies the type fed via `abi::feed()` for streaming functions |
 | Doc comments | Included in schema |
 
 ### Trait Implementation Exposure
@@ -172,6 +173,39 @@ impl SomeTrait for MyContract {
     fn internal_helper(&self) { ... }  // Not exposed
 }
 ```
+
+### Streaming Functions (abi::feed)
+
+Some contract functions stream data to the host using `abi::feed()` instead of returning a value directly. These functions return `()` but feed data in chunks that clients need to decode.
+
+Use the `#[contract(feeds = "Type")]` attribute to specify the fed type:
+
+```rust
+#[contract]
+mod my_contract {
+    impl MyContract {
+        /// Feeds all pending withdrawals to the host.
+        #[contract(feeds = "(WithdrawalId, PendingWithdrawal)")]
+        pub fn pending_withdrawals(&self) {
+            for (id, pending) in &self.pending_withdrawals {
+                abi::feed((*id, *pending));
+            }
+        }
+
+        /// Feeds all finalized withdrawal IDs to the host.
+        #[contract(feeds = "WithdrawalId")]
+        pub fn finalized_withdrawals(&self) {
+            for id in &self.finalized_withdrawals {
+                abi::feed(*id);
+            }
+        }
+    }
+}
+```
+
+The macro uses the `feeds` type for `decode_output_fn` in the data-driver instead of the return type, allowing clients to correctly decode the streamed data.
+
+**Important:** Without the `feeds` attribute, functions returning `()` generate `Ok(JsonValue::Null)` in the data-driver, which won't decode the fed data correctly.
 
 ### Custom Data-Driver Functions
 
