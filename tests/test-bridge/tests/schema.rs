@@ -188,6 +188,36 @@ impl DataDriverWasm {
         Self { store, instance }
     }
 
+    /// Call get_last_error to retrieve the error message after a failed operation.
+    fn get_last_error(&mut self) -> String {
+        let memory = self
+            .instance
+            .get_memory(&mut self.store, "memory")
+            .expect("Failed to get memory");
+
+        let get_error = self
+            .instance
+            .get_typed_func::<(i32, i32), i32>(&mut self.store, "get_last_error")
+            .expect("Failed to get get_last_error function");
+
+        let out_offset = 1024 * 16; // Use a different offset to avoid conflicts
+        let out_size = 4096;
+
+        let result = get_error
+            .call(&mut self.store, (out_offset as i32, out_size as i32))
+            .expect("Failed to call get_last_error");
+
+        if result != 0 {
+            return format!("get_last_error failed with code {result}");
+        }
+
+        let data = memory.data(&self.store);
+        let len_bytes = &data[out_offset..out_offset + 4];
+        let len =
+            u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
+        String::from_utf8_lossy(&data[out_offset + 4..out_offset + 4 + len]).to_string()
+    }
+
     /// Call encode_input_fn via the WASM interface.
     fn encode_input(&mut self, fn_name: &str, json: &str) -> Result<Vec<u8>, String> {
         let memory = self
@@ -239,12 +269,7 @@ impl DataDriverWasm {
             .expect("Failed to call encode_input_fn");
 
         if result != 0 {
-            // Read error message
-            let data = memory.data(&self.store);
-            let len_bytes = &data[out_offset..out_offset + 4];
-            let len =
-                u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
-            let msg = String::from_utf8_lossy(&data[out_offset + 4..out_offset + 4 + len]);
+            let msg = self.get_last_error();
             return Err(format!("Error code {result}: {msg}"));
         }
 
@@ -313,12 +338,7 @@ impl DataDriverWasm {
             .unwrap_or_else(|_| panic!("Failed to call {wasm_fn}"));
 
         if result != 0 {
-            // Read error message
-            let data = memory.data(&self.store);
-            let len_bytes = &data[out_offset..out_offset + 4];
-            let len =
-                u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
-            let msg = String::from_utf8_lossy(&data[out_offset + 4..out_offset + 4 + len]);
+            let msg = self.get_last_error();
             return Err(format!("Error code {result}: {msg}"));
         }
 
@@ -630,5 +650,71 @@ fn test_decode_event_bridge_initiated() {
     assert!(
         decoded["extra_data"].is_array(),
         "extra_data should be an array"
+    );
+}
+
+// =============================================================================
+// Negative tests for error handling
+// =============================================================================
+
+#[test]
+fn test_encode_input_unknown_function() {
+    let mut driver = DataDriverWasm::new();
+
+    let result = driver.encode_input("nonexistent_function", "{}");
+
+    assert!(result.is_err(), "Should fail for unknown function");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("unknown fn") || err.contains("Unknown"),
+        "Error should mention unknown function: {err}"
+    );
+}
+
+#[test]
+fn test_encode_input_malformed_json() {
+    let mut driver = DataDriverWasm::new();
+
+    // "pause" expects () input, but we send invalid JSON
+    let result = driver.encode_input("pause", "not valid json {{{");
+
+    assert!(result.is_err(), "Should fail for malformed JSON");
+}
+
+#[test]
+fn test_decode_output_unknown_function() {
+    let mut driver = DataDriverWasm::new();
+
+    let result = driver.decode_output("nonexistent_function", &[]);
+
+    assert!(result.is_err(), "Should fail for unknown function");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("unknown fn") || err.contains("Unknown"),
+        "Error should mention unknown function: {err}"
+    );
+}
+
+#[test]
+fn test_decode_output_malformed_rkyv() {
+    let mut driver = DataDriverWasm::new();
+
+    // "is_paused" returns bool, but we send garbage bytes
+    let result = driver.decode_output("is_paused", &[0xFF, 0xFF, 0xFF]);
+
+    assert!(result.is_err(), "Should fail for malformed rkyv data");
+}
+
+#[test]
+fn test_decode_event_unknown_topic() {
+    let mut driver = DataDriverWasm::new();
+
+    let result = driver.decode_event("unknown_event_topic", &[]);
+
+    assert!(result.is_err(), "Should fail for unknown event topic");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("unknown event") || err.contains("Unknown"),
+        "Error should mention unknown event: {err}"
     );
 }
