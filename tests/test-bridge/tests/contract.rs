@@ -19,7 +19,7 @@ use dusk_core::abi::ContractId;
 use dusk_core::dusk;
 use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as AccountSecretKey};
 use dusk_vm::CallReceipt;
-use evm_core::standard_bridge::{EVMAddress, SetEVMAddressOrOffset};
+use evm_core::standard_bridge::{EVMAddress, PendingWithdrawal, SetEVMAddressOrOffset};
 use evm_core::Address as DSAddress;
 
 use rand::rngs::StdRng;
@@ -158,6 +158,13 @@ impl TestBridgeSession {
             .expect("other_bridge_ref should succeed")
             .data
     }
+
+    fn verify_withdrawal(&mut self, withdrawal: PendingWithdrawal) -> bool {
+        self.session
+            .direct_call::<_, bool>(TEST_BRIDGE_ID, "verify_withdrawal", &withdrawal)
+            .expect("verify_withdrawal should succeed")
+            .data
+    }
 }
 
 #[test]
@@ -247,4 +254,33 @@ fn test_method_returning_reference() {
 
     // Verify the regular getter returns the same value
     assert_eq!(session.other_bridge(), other_bridge);
+}
+
+#[test]
+fn test_method_with_reference_parameter() {
+    let mut session = TestBridgeSession::new();
+
+    // Create a valid withdrawal (amount > 0 and block_height > 0)
+    // PendingWithdrawal: from is EVMAddress, to is DSAddress
+    let valid_withdrawal = PendingWithdrawal {
+        from: EVMAddress([1u8; 20]),
+        to: *OWNER_ADDRESS,
+        amount: 1000,
+        block_height: 100,
+    };
+
+    // The macro should receive PendingWithdrawal and pass &withdrawal to the method
+    let is_valid = session.verify_withdrawal(valid_withdrawal);
+    assert!(is_valid, "withdrawal with amount > 0 and block_height > 0 should be valid");
+
+    // Create an invalid withdrawal (amount = 0)
+    let invalid_withdrawal = PendingWithdrawal {
+        from: EVMAddress([2u8; 20]),
+        to: *OWNER_ADDRESS,
+        amount: 0,
+        block_height: 100,
+    };
+
+    let is_valid = session.verify_withdrawal(invalid_withdrawal);
+    assert!(!is_valid, "withdrawal with amount = 0 should be invalid");
 }

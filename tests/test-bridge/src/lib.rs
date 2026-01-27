@@ -159,6 +159,15 @@ mod test_bridge {
             &self.other_bridge
         }
 
+        /// Verifies a pending withdrawal without taking ownership.
+        ///
+        /// Tests that the macro correctly handles reference parameters by receiving
+        /// owned values and passing references. The macro should generate code that
+        /// receives `PendingWithdrawal` and passes `&withdrawal` to this method.
+        pub fn verify_withdrawal(&self, withdrawal: &PendingWithdrawal) -> bool {
+            withdrawal.amount > 0 && withdrawal.block_height > 0
+        }
+
         /// Adds a pending withdrawal.
         pub fn add_pending_withdrawal(&mut self, withdrawal: WithdrawalRequest) {
             let id = withdrawal.id;
