@@ -1078,4 +1078,279 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("tuple"), "error should mention 'tuple': {msg}");
     }
+
+    // ========================================================================
+    // Module-level edge case tests (Task 16)
+    // ========================================================================
+
+    #[test]
+    fn test_contract_struct_no_public_struct() {
+        let module: ItemMod = syn::parse_quote! {
+            mod my_contract {
+                struct PrivateState {
+                    value: u64,
+                }
+            }
+        };
+        let items = module.content.as_ref().unwrap().1.clone();
+
+        let result = contract_struct(&module, &items);
+        let Err(err) = result else {
+            panic!("expected error for no public struct");
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("pub struct"),
+            "error should mention 'pub struct': {msg}"
+        );
+    }
+
+    #[test]
+    fn test_contract_struct_only_private_structs() {
+        let module: ItemMod = syn::parse_quote! {
+            mod my_contract {
+                struct PrivateOne {
+                    a: u64,
+                }
+                struct PrivateTwo {
+                    b: u64,
+                }
+            }
+        };
+        let items = module.content.as_ref().unwrap().1.clone();
+
+        let result = contract_struct(&module, &items);
+        let Err(err) = result else {
+            panic!("expected error for only private structs");
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("pub struct"),
+            "error should mention 'pub struct': {msg}"
+        );
+    }
+
+    #[test]
+    fn test_contract_struct_multiple_public_structs() {
+        let module: ItemMod = syn::parse_quote! {
+            mod my_contract {
+                pub struct ContractOne {
+                    a: u64,
+                }
+                pub struct ContractTwo {
+                    b: u64,
+                }
+            }
+        };
+        let items = module.content.as_ref().unwrap().1.clone();
+
+        let result = contract_struct(&module, &items);
+        let Err(err) = result else {
+            panic!("expected error for multiple public structs");
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("exactly one pub struct"),
+            "error should mention 'exactly one pub struct': {msg}"
+        );
+        assert!(
+            msg.contains("multiple"),
+            "error should mention 'multiple': {msg}"
+        );
+    }
+
+    #[test]
+    fn test_contract_data_no_impl_block() {
+        let module: ItemMod = syn::parse_quote! {
+            mod my_contract {
+                pub struct MyContract {
+                    value: u64,
+                }
+            }
+        };
+        let items = module.content.as_ref().unwrap().1.clone();
+
+        let result = contract_data(&module, &items);
+        let Err(err) = result else {
+            panic!("expected error for missing impl block");
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("impl block"),
+            "error should mention 'impl block': {msg}"
+        );
+        assert!(
+            msg.contains("MyContract"),
+            "error should mention contract name: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_contract_data_impl_for_different_type() {
+        // Impl block exists but for wrong type
+        let module: ItemMod = syn::parse_quote! {
+            mod my_contract {
+                pub struct MyContract {
+                    value: u64,
+                }
+                struct Helper;
+                impl Helper {
+                    pub const fn new() -> Self { Self }
+                }
+            }
+        };
+        let items = module.content.as_ref().unwrap().1.clone();
+
+        let result = contract_data(&module, &items);
+        let Err(err) = result else {
+            panic!("expected error for impl on wrong type");
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("impl block"),
+            "error should mention 'impl block': {msg}"
+        );
+    }
+
+    #[test]
+    fn test_contract_data_glob_import_rejected() {
+        let module: ItemMod = syn::parse_quote! {
+            mod my_contract {
+                use some_crate::*;
+                pub struct MyContract {
+                    value: u64,
+                }
+                impl MyContract {
+                    pub const fn new() -> Self { Self { value: 0 } }
+                }
+            }
+        };
+        let items = module.content.as_ref().unwrap().1.clone();
+
+        let result = contract_data(&module, &items);
+        let Err(err) = result else {
+            panic!("expected error for glob import");
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("glob import"),
+            "error should mention 'glob import': {msg}"
+        );
+    }
+
+    #[test]
+    fn test_contract_data_relative_import_rejected() {
+        let module: ItemMod = syn::parse_quote! {
+            mod my_contract {
+                use super::SomeType;
+                pub struct MyContract {
+                    value: u64,
+                }
+                impl MyContract {
+                    pub const fn new() -> Self { Self { value: 0 } }
+                }
+            }
+        };
+        let items = module.content.as_ref().unwrap().1.clone();
+
+        let result = contract_data(&module, &items);
+        let Err(err) = result else {
+            panic!("expected error for relative import");
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("relative import"),
+            "error should mention 'relative import': {msg}"
+        );
+    }
+
+    #[test]
+    fn test_impl_blocks_finds_multiple() {
+        let items: Vec<Item> = vec![
+            syn::parse_quote! {
+                impl MyContract {
+                    pub fn method_a(&self) -> u64 { 0 }
+                }
+            },
+            syn::parse_quote! {
+                impl MyContract {
+                    pub fn method_b(&self) -> u64 { 1 }
+                }
+            },
+        ];
+
+        let blocks = impl_blocks(&items, "MyContract");
+        assert_eq!(blocks.len(), 2, "should find both impl blocks");
+    }
+
+    #[test]
+    fn test_impl_blocks_ignores_trait_impls() {
+        let items: Vec<Item> = vec![
+            syn::parse_quote! {
+                impl MyContract {
+                    pub fn method_a(&self) -> u64 { 0 }
+                }
+            },
+            syn::parse_quote! {
+                impl SomeTrait for MyContract {
+                    fn trait_method(&self) {}
+                }
+            },
+        ];
+
+        let blocks = impl_blocks(&items, "MyContract");
+        assert_eq!(blocks.len(), 1, "should only find inherent impl block");
+    }
+
+    #[test]
+    fn test_trait_impls_finds_with_expose() {
+        let items: Vec<Item> = vec![
+            syn::parse_quote! {
+                #[contract(expose = [owner])]
+                impl OwnableTrait for MyContract {
+                    fn owner(&self) -> Address { self.owner }
+                }
+            },
+        ];
+
+        let trait_impls = trait_impls(&items, "MyContract");
+        assert_eq!(trait_impls.len(), 1);
+        assert_eq!(trait_impls[0].trait_name, "OwnableTrait");
+        assert_eq!(trait_impls[0].expose_list, vec!["owner"]);
+    }
+
+    #[test]
+    fn test_trait_impls_ignores_without_expose() {
+        let items: Vec<Item> = vec![
+            syn::parse_quote! {
+                impl OwnableTrait for MyContract {
+                    fn owner(&self) -> Address { self.owner }
+                }
+            },
+        ];
+
+        let trait_impls = trait_impls(&items, "MyContract");
+        assert_eq!(trait_impls.len(), 0, "should not find trait impl without expose attribute");
+    }
+
+    #[test]
+    fn test_trait_impls_multiple_traits() {
+        let items: Vec<Item> = vec![
+            syn::parse_quote! {
+                #[contract(expose = [owner])]
+                impl OwnableTrait for MyContract {
+                    fn owner(&self) -> Address { self.owner }
+                }
+            },
+            syn::parse_quote! {
+                #[contract(expose = [version])]
+                impl ISemver for MyContract {
+                    fn version(&self) -> String { "1.0".to_string() }
+                }
+            },
+        ];
+
+        let trait_impls = trait_impls(&items, "MyContract");
+        assert_eq!(trait_impls.len(), 2);
+    }
 }
