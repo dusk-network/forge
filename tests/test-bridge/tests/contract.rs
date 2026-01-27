@@ -459,6 +459,53 @@ fn test_trait_default_renounce_only_owner() {
 }
 
 // =============================================================================
+// Multiple trait implementation tests
+// =============================================================================
+//
+// These tests verify that multiple trait implementations with
+// `#[contract(expose = [...])]` are correctly handled.
+
+#[test]
+fn test_multiple_trait_implementations() {
+    let mut session = TestBridgeSession::new();
+
+    // Test OwnableUpgradeable trait methods (first trait impl)
+    assert_eq!(session.owner(), Some(*OWNER_ADDRESS), "owner() from OwnableUpgradeable should work");
+
+    // Test Pausable trait methods (second trait impl)
+    // paused() should return the current paused state
+    let paused_result = session
+        .session
+        .direct_call::<_, bool>(TEST_BRIDGE_ID, "paused", &())
+        .expect("paused should succeed");
+    assert!(!paused_result.data, "Contract should not be paused initially");
+
+    // toggle_pause() should toggle and return the new state
+    let toggle_result = session
+        .session
+        .call_public::<_, bool>(&OWNER_SK, TEST_BRIDGE_ID, "toggle_pause", &())
+        .expect("toggle_pause should succeed");
+    assert!(toggle_result.data, "toggle_pause should return true (now paused)");
+
+    // paused() should now return true
+    let paused_result = session
+        .session
+        .direct_call::<_, bool>(TEST_BRIDGE_ID, "paused", &())
+        .expect("paused should succeed");
+    assert!(paused_result.data, "Contract should be paused after toggle");
+
+    // Toggle again to unpause
+    let toggle_result = session
+        .session
+        .call_public::<_, bool>(&OWNER_SK, TEST_BRIDGE_ID, "toggle_pause", &())
+        .expect("toggle_pause should succeed");
+    assert!(!toggle_result.data, "toggle_pause should return false (now unpaused)");
+
+    // Verify OwnableUpgradeable still works after using Pausable
+    assert_eq!(session.owner(), Some(*OWNER_ADDRESS), "owner() should still work");
+}
+
+// =============================================================================
 // Streaming function tests (abi::feed integration)
 // =============================================================================
 //

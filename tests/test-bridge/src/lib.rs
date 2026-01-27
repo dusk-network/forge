@@ -34,6 +34,22 @@ mod test_bridge {
     };
     use evm_core::{Address as DSAddress, OwnableUpgradeable};
 
+    // =========================================================================
+    // Test trait for multiple trait implementation testing
+    // =========================================================================
+
+    /// A simple trait for testing multiple trait implementations.
+    ///
+    /// This trait exists solely to verify that the macro correctly handles
+    /// multiple `#[contract(expose = [...])]` trait implementations.
+    pub trait Pausable {
+        /// Returns whether the contract is currently paused.
+        fn paused(&self) -> bool;
+
+        /// Toggles the paused state and returns the new state.
+        fn toggle_pause(&mut self) -> bool;
+    }
+
     /// Test bridge contract state.
     ///
     /// Minimal contract struct that mirrors StandardBridge fields
@@ -293,6 +309,25 @@ mod test_bridge {
         /// Renounces ownership of the contract.
         /// Empty body signals the macro to use the trait's default implementation.
         fn renounce_ownership(&mut self) {}
+    }
+
+    /// `Pausable` trait implementation.
+    ///
+    /// Demonstrates that the macro correctly handles multiple trait implementations
+    /// with `#[contract(expose = [...])]`. Both `OwnableUpgradeable` and `Pausable`
+    /// methods should appear in the schema and be callable.
+    #[contract(expose = [paused, toggle_pause])]
+    impl Pausable for TestBridge {
+        /// Returns whether the contract is currently paused.
+        fn paused(&self) -> bool {
+            self.is_paused
+        }
+
+        /// Toggles the paused state and returns the new state.
+        fn toggle_pause(&mut self) -> bool {
+            self.is_paused = !self.is_paused;
+            self.is_paused
+        }
     }
 
     // =========================================================================

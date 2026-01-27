@@ -1006,8 +1006,12 @@ fn test_schema_multiple_impl_blocks() {
     assert!(fn_names.contains(&"pending_withdrawals"), "missing pending_withdrawals from second impl block");
     assert!(fn_names.contains(&"pending_withdrawal_ids"), "missing pending_withdrawal_ids from second impl block");
 
-    // Verify trait methods are also present
-    assert!(fn_names.contains(&"owner"), "missing owner from trait impl");
-    assert!(fn_names.contains(&"transfer_ownership"), "missing transfer_ownership from trait impl");
-    assert!(fn_names.contains(&"renounce_ownership"), "missing renounce_ownership from trait impl");
+    // Verify OwnableUpgradeable trait methods are present
+    assert!(fn_names.contains(&"owner"), "missing owner from OwnableUpgradeable trait impl");
+    assert!(fn_names.contains(&"transfer_ownership"), "missing transfer_ownership from OwnableUpgradeable trait impl");
+    assert!(fn_names.contains(&"renounce_ownership"), "missing renounce_ownership from OwnableUpgradeable trait impl");
+
+    // Verify Pausable trait methods are present (second trait implementation)
+    assert!(fn_names.contains(&"paused"), "missing paused from Pausable trait impl");
+    assert!(fn_names.contains(&"toggle_pause"), "missing toggle_pause from Pausable trait impl");
 }
