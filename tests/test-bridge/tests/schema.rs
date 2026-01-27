@@ -718,3 +718,257 @@ fn test_decode_event_unknown_topic() {
         "Error should mention unknown event: {err}"
     );
 }
+
+// =============================================================================
+// Schema detail verification tests (Task 7)
+// =============================================================================
+
+#[test]
+fn test_schema_function_input_output_types() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let functions = schema["functions"].as_array().expect("functions should be an array");
+
+    // Test is_paused: no input, returns bool
+    let is_paused = functions
+        .iter()
+        .find(|f| f["name"] == "is_paused")
+        .expect("is_paused should exist");
+    assert_eq!(is_paused["input"], "()", "is_paused input should be ()");
+    assert_eq!(is_paused["output"], "bool", "is_paused output should be bool");
+
+    // Test init: takes DSAddress, returns ()
+    let init = functions
+        .iter()
+        .find(|f| f["name"] == "init")
+        .expect("init should exist");
+    let init_input = init["input"].as_str().unwrap();
+    assert!(
+        init_input.contains("Address"),
+        "init input should contain Address: {init_input}"
+    );
+    assert_eq!(init["output"], "()", "init output should be ()");
+
+    // Test finalization_period: no input, returns u64
+    let fin_period = functions
+        .iter()
+        .find(|f| f["name"] == "finalization_period")
+        .expect("finalization_period should exist");
+    assert_eq!(fin_period["input"], "()", "finalization_period input should be ()");
+    assert_eq!(fin_period["output"], "u64", "finalization_period output should be u64");
+
+    // Test deposit: takes Deposit type, returns ()
+    let deposit = functions
+        .iter()
+        .find(|f| f["name"] == "deposit")
+        .expect("deposit should exist");
+    let deposit_input = deposit["input"].as_str().unwrap();
+    assert!(
+        deposit_input.contains("Deposit"),
+        "deposit input should contain Deposit: {deposit_input}"
+    );
+    assert_eq!(deposit["output"], "()", "deposit output should be ()");
+
+    // Test pending_withdrawal: takes WithdrawalId, returns Option<PendingWithdrawal>
+    let pending = functions
+        .iter()
+        .find(|f| f["name"] == "pending_withdrawal")
+        .expect("pending_withdrawal should exist");
+    let pending_input = pending["input"].as_str().unwrap();
+    let pending_output = pending["output"].as_str().unwrap();
+    assert!(
+        pending_input.contains("WithdrawalId"),
+        "pending_withdrawal input should contain WithdrawalId: {pending_input}"
+    );
+    assert!(
+        pending_output.contains("Option") && pending_output.contains("PendingWithdrawal"),
+        "pending_withdrawal output should be Option<PendingWithdrawal>: {pending_output}"
+    );
+}
+
+#[test]
+fn test_schema_function_with_multiple_params() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let functions = schema["functions"].as_array().expect("functions should be an array");
+
+    // Test initiate_transfer: takes (EVMAddress, DSAddress, u64)
+    let transfer = functions
+        .iter()
+        .find(|f| f["name"] == "initiate_transfer")
+        .expect("initiate_transfer should exist");
+    let input = transfer["input"].as_str().unwrap();
+
+    // Input should be a tuple containing the three parameter types
+    assert!(
+        input.contains("EVMAddress"),
+        "initiate_transfer input should contain EVMAddress: {input}"
+    );
+    assert!(
+        input.contains("u64"),
+        "initiate_transfer input should contain u64: {input}"
+    );
+}
+
+#[test]
+fn test_schema_doc_comments() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let functions = schema["functions"].as_array().expect("functions should be an array");
+
+    // is_paused has doc comment "Returns whether the bridge is paused."
+    let is_paused = functions
+        .iter()
+        .find(|f| f["name"] == "is_paused")
+        .expect("is_paused should exist");
+    let doc = is_paused["doc"].as_str().unwrap_or("");
+    assert!(
+        doc.contains("paused"),
+        "is_paused doc should mention 'paused', got: {doc}"
+    );
+
+    // pause has doc comment "Pauses the bridge."
+    let pause = functions
+        .iter()
+        .find(|f| f["name"] == "pause")
+        .expect("pause should exist");
+    let doc = pause["doc"].as_str().unwrap_or("");
+    assert!(
+        doc.contains("Pause"),
+        "pause doc should mention 'Pause', got: {doc}"
+    );
+
+    // finalization_period has doc comment "Returns the finalization period."
+    let fin_period = functions
+        .iter()
+        .find(|f| f["name"] == "finalization_period")
+        .expect("finalization_period should exist");
+    let doc = fin_period["doc"].as_str().unwrap_or("");
+    assert!(
+        doc.contains("finalization"),
+        "finalization_period doc should mention 'finalization', got: {doc}"
+    );
+}
+
+#[test]
+fn test_schema_event_details() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let events = schema["events"].as_array().expect("events should be an array");
+
+    // Find BridgeInitiated event and verify data type
+    let bridge_initiated = events
+        .iter()
+        .find(|e| {
+            e["topic"]
+                .as_str()
+                .map(|t| t.contains("BridgeInitiated"))
+                .unwrap_or(false)
+        })
+        .expect("BridgeInitiated event should exist");
+
+    let data_type = bridge_initiated["data"].as_str().unwrap();
+    assert!(
+        data_type.contains("BridgeInitiated"),
+        "BridgeInitiated data type should contain BridgeInitiated: {data_type}"
+    );
+
+    // Find BridgeFinalized event
+    let bridge_finalized = events
+        .iter()
+        .find(|e| {
+            e["topic"]
+                .as_str()
+                .map(|t| t.contains("BridgeFinalized"))
+                .unwrap_or(false)
+        })
+        .expect("BridgeFinalized event should exist");
+
+    let data_type = bridge_finalized["data"].as_str().unwrap();
+    assert!(
+        data_type.contains("BridgeFinalized"),
+        "BridgeFinalized data type should contain BridgeFinalized: {data_type}"
+    );
+}
+
+#[test]
+fn test_schema_import_paths() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let imports = schema["imports"].as_array().expect("imports should be an array");
+
+    // Verify Deposit import has full path
+    let deposit_import = imports
+        .iter()
+        .find(|i| i["name"] == "Deposit")
+        .expect("Deposit import should exist");
+
+    let path = deposit_import["path"].as_str().unwrap();
+    assert!(
+        path.contains("evm_core"),
+        "Deposit path should be fully qualified with evm_core: {path}"
+    );
+    assert!(
+        path.contains("standard_bridge"),
+        "Deposit path should include standard_bridge: {path}"
+    );
+
+    // Verify EVMAddress import
+    let evm_addr_import = imports
+        .iter()
+        .find(|i| i["name"] == "EVMAddress")
+        .expect("EVMAddress import should exist");
+
+    let path = evm_addr_import["path"].as_str().unwrap();
+    assert!(
+        path.contains("evm_core"),
+        "EVMAddress path should be fully qualified: {path}"
+    );
+
+    // Verify events import
+    let events_import = imports
+        .iter()
+        .find(|i| i["name"] == "events")
+        .expect("events import should exist");
+
+    let path = events_import["path"].as_str().unwrap();
+    assert!(
+        path.contains("evm_core") || path.contains("standard_bridge"),
+        "events path should be qualified: {path}"
+    );
+}
+
+#[test]
+fn test_schema_custom_flag() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let functions = schema["functions"].as_array().expect("functions should be an array");
+
+    // Regular functions should have custom = false
+    let is_paused = functions
+        .iter()
+        .find(|f| f["name"] == "is_paused")
+        .expect("is_paused should exist");
+    assert_eq!(
+        is_paused["custom"], false,
+        "is_paused should not be custom"
+    );
+
+    let pause = functions
+        .iter()
+        .find(|f| f["name"] == "pause")
+        .expect("pause should exist");
+    assert_eq!(pause["custom"], false, "pause should not be custom");
+}

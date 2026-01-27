@@ -600,11 +600,12 @@ fn test_schema_import_paths() {
 
 ### Acceptance Criteria
 
-- [ ] Tests verify function input/output types
-- [ ] Tests verify doc comments are captured
-- [ ] Tests verify event data types
-- [ ] Tests verify import paths are fully qualified
-- [ ] All tests pass with `make test`
+- [x] Tests verify function input/output types (`test_schema_function_input_output_types`, `test_schema_function_with_multiple_params`)
+- [x] Tests verify doc comments are captured (`test_schema_doc_comments`)
+- [x] Tests verify event data types (`test_schema_event_details`)
+- [x] Tests verify import paths are fully qualified (`test_schema_import_paths`)
+- [x] Tests verify custom flag (`test_schema_custom_flag`)
+- [x] All tests pass with `make test`
 
 ---
 
@@ -874,7 +875,7 @@ fn test_trait_default_only_owner_check() {
 | 4. Multiple parameters test | Medium | [x] |
 | 5. Event decoding test | Medium | [x] |
 | 6. Negative integration tests | Medium | [x] |
-| 7. Schema detail tests | Low | [ ] |
+| 7. Schema detail tests | Low | [x] |
 | 8. `EmitVisitor` unit tests | Low | [ ] |
 | 9. Multiple impl blocks test | Low | [ ] |
 | 10. Trait default impl test | Low | [ ] |
