@@ -735,4 +735,52 @@ mod tests {
             .to_string()
             .contains("cannot have generic or const parameters"));
     }
+
+    #[test]
+    fn test_trait_method_async() {
+        let method: ImplItemFn = syn::parse_quote! {
+            async fn fetch(&self) -> Data {}
+        };
+        let err = trait_method(&method, "AsyncTrait", false).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("cannot be async"), "error should mention async: {msg}");
+        assert!(
+            msg.contains("AsyncTrait::fetch"),
+            "error should include trait::method name: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_trait_method_impl_trait_param() {
+        let method: ImplItemFn = syn::parse_quote! {
+            fn process(&self, handler: impl Handler) {}
+        };
+        let err = trait_method(&method, "Processor", false).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("impl Trait"),
+            "error should mention 'impl Trait': {msg}"
+        );
+        assert!(
+            msg.contains("parameters"),
+            "error should mention parameters: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_trait_method_impl_trait_return() {
+        let method: ImplItemFn = syn::parse_quote! {
+            fn items(&self) -> impl Iterator<Item = u64> {}
+        };
+        let err = trait_method(&method, "Collection", false).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("impl Trait"),
+            "error should mention 'impl Trait': {msg}"
+        );
+        assert!(
+            msg.contains("return type"),
+            "error should mention return type: {msg}"
+        );
+    }
 }
