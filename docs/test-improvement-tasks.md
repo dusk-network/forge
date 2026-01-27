@@ -782,9 +782,9 @@ Ensure existing tests still pass - this validates the macro correctly merges fun
 
 ### Acceptance Criteria
 
-- [ ] TestBridge has 2+ inherent impl blocks
-- [ ] All existing tests still pass
-- [ ] Schema contains functions from all impl blocks
+- [x] TestBridge has 2 inherent impl blocks (split after `other_bridge`)
+- [x] All existing tests still pass
+- [x] Schema contains functions from all impl blocks (`test_schema_multiple_impl_blocks`)
 
 ---
 
@@ -877,7 +877,7 @@ fn test_trait_default_only_owner_check() {
 | 6. Negative integration tests | Medium | [x] |
 | 7. Schema detail tests | Low | [x] |
 | 8. `EmitVisitor` unit tests | Low | [x] |
-| 9. Multiple impl blocks test | Low | [ ] |
+| 9. Multiple impl blocks test | Low | [x] |
 | 10. Trait default impl test | Low | [ ] |
 
 ---

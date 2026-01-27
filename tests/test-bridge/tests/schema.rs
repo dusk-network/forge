@@ -972,3 +972,42 @@ fn test_schema_custom_flag() {
         .expect("pause should exist");
     assert_eq!(pause["custom"], false, "pause should not be custom");
 }
+
+#[test]
+fn test_schema_multiple_impl_blocks() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let fn_names: Vec<&str> = functions
+        .iter()
+        .map(|f| f["name"].as_str().unwrap())
+        .collect();
+
+    // Functions from the FIRST impl block (new is const fn, not exported)
+    assert!(fn_names.contains(&"init"), "missing init from first impl block");
+    assert!(fn_names.contains(&"is_paused"), "missing is_paused from first impl block");
+    assert!(fn_names.contains(&"pause"), "missing pause from first impl block");
+    assert!(fn_names.contains(&"unpause"), "missing unpause from first impl block");
+    assert!(fn_names.contains(&"finalization_period"), "missing finalization_period from first impl block");
+    assert!(fn_names.contains(&"set_u64"), "missing set_u64 from first impl block");
+    assert!(fn_names.contains(&"set_evm_address_or_offset"), "missing set_evm_address_or_offset from first impl block");
+    assert!(fn_names.contains(&"other_bridge"), "missing other_bridge from first impl block");
+
+    // Functions from the SECOND impl block
+    assert!(fn_names.contains(&"deposit"), "missing deposit from second impl block");
+    assert!(fn_names.contains(&"pending_withdrawal"), "missing pending_withdrawal from second impl block");
+    assert!(fn_names.contains(&"other_bridge_ref"), "missing other_bridge_ref from second impl block");
+    assert!(fn_names.contains(&"verify_withdrawal"), "missing verify_withdrawal from second impl block");
+    assert!(fn_names.contains(&"initiate_transfer"), "missing initiate_transfer from second impl block");
+    assert!(fn_names.contains(&"add_pending_withdrawal"), "missing add_pending_withdrawal from second impl block");
+    assert!(fn_names.contains(&"finalize_withdrawal"), "missing finalize_withdrawal from second impl block");
+    assert!(fn_names.contains(&"pending_withdrawals"), "missing pending_withdrawals from second impl block");
+    assert!(fn_names.contains(&"pending_withdrawal_ids"), "missing pending_withdrawal_ids from second impl block");
+
+    // Verify trait methods are also present
+    assert!(fn_names.contains(&"owner"), "missing owner from trait impl");
+    assert!(fn_names.contains(&"transfer_ownership"), "missing transfer_ownership from trait impl");
+    assert!(fn_names.contains(&"renounce_ownership"), "missing renounce_ownership from trait impl");
+}

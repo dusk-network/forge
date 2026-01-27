@@ -120,7 +120,16 @@ mod test_bridge {
         pub fn other_bridge(&self) -> EVMAddress {
             self.other_bridge
         }
+    }
 
+    // =========================================================================
+    // Second impl block - tests that macro handles multiple impl blocks
+    // =========================================================================
+    //
+    // This second impl block verifies the macro correctly merges functions
+    // from multiple inherent impl blocks into the schema and extern wrappers.
+
+    impl TestBridge {
         /// Deposits funds.
         pub fn deposit(&mut self, deposit: Deposit) {
             assert!(!self.is_paused, "bridge is paused");
