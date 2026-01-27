@@ -859,9 +859,10 @@ fn test_trait_default_only_owner_check() {
 
 ### Acceptance Criteria
 
-- [ ] Test verifies trait default implementation is called (via event emission)
-- [ ] Test verifies trait's access control (only_owner) works
-- [ ] Tests pass with `make test`
+- [x] Test verifies trait default implementation is called (`test_trait_default_implementation_emits_event`)
+- [x] Test verifies trait's access control for transfer_ownership (`test_trait_default_only_owner_check`)
+- [x] Test verifies trait's access control for renounce_ownership (`test_trait_default_renounce_only_owner`)
+- [x] Tests pass with `make test`
 
 ---
 
@@ -878,7 +879,7 @@ fn test_trait_default_only_owner_check() {
 | 7. Schema detail tests | Low | [x] |
 | 8. `EmitVisitor` unit tests | Low | [x] |
 | 9. Multiple impl blocks test | Low | [x] |
-| 10. Trait default impl test | Low | [ ] |
+| 10. Trait default impl test | Low | [x] |
 
 ---
 

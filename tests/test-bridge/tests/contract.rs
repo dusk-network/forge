@@ -314,3 +314,103 @@ fn test_method_with_multiple_parameters() {
         "initiate_transfer should emit BridgeInitiated event"
     );
 }
+
+// =============================================================================
+// Trait default implementation tests (Task 10)
+// =============================================================================
+//
+// These tests verify that empty trait method bodies correctly trigger
+// the trait's default implementation rather than doing nothing.
+
+#[test]
+fn test_trait_default_implementation_emits_event() {
+    let mut session = TestBridgeSession::new();
+
+    // The transfer_ownership method has an empty body in the contract:
+    //   fn transfer_ownership(&mut self, new_owner: DSAddress) {}
+    //
+    // The macro should generate code that calls the trait's default:
+    //   OwnableUpgradeable::transfer_ownership(&mut STATE, new_owner)
+    //
+    // The trait's default implementation emits an OwnershipTransferred event.
+    // If the macro incorrectly used the empty body, no event would be emitted.
+
+    let receipt = session.transfer_ownership(&OWNER_SK, *TEST_ADDRESS);
+
+    // Verify the trait's default implementation was called by checking:
+    // 1. Ownership actually changed
+    assert_eq!(
+        session.owner(),
+        Some(*TEST_ADDRESS),
+        "Ownership should have changed - trait default must set new owner"
+    );
+
+    // 2. Event was emitted (trait default emits OwnershipTransferred)
+    assert!(
+        !receipt.events.is_empty(),
+        "Trait default should emit OwnershipTransferred event"
+    );
+
+    // Find the ownership event
+    let ownership_event = receipt
+        .events
+        .iter()
+        .find(|e| e.topic.contains("ownership"));
+    assert!(
+        ownership_event.is_some(),
+        "Should have ownership-related event from trait default"
+    );
+}
+
+#[test]
+fn test_trait_default_only_owner_check() {
+    let mut session = TestBridgeSession::new();
+
+    // Verify initial owner
+    assert_eq!(session.owner(), Some(*OWNER_ADDRESS));
+
+    // Try to transfer ownership as non-owner (TEST_SK is not the owner)
+    // The trait's default implementation should call only_owner() which panics
+    let result = session.session.call_public::<_, ()>(
+        &TEST_SK,
+        TEST_BRIDGE_ID,
+        "transfer_ownership",
+        &*OWNER_ADDRESS,
+    );
+
+    // Should fail because TEST_SK is not the owner
+    assert!(
+        result.is_err(),
+        "Non-owner should not be able to transfer ownership"
+    );
+
+    // Verify ownership didn't change
+    assert_eq!(
+        session.owner(),
+        Some(*OWNER_ADDRESS),
+        "Ownership should remain unchanged after failed transfer"
+    );
+}
+
+#[test]
+fn test_trait_default_renounce_only_owner() {
+    let mut session = TestBridgeSession::new();
+
+    // Try to renounce ownership as non-owner
+    let result = session
+        .session
+        .call_public::<_, ()>(&TEST_SK, TEST_BRIDGE_ID, "renounce_ownership", &());
+
+    // Should fail because TEST_SK is not the owner
+    assert!(
+        result.is_err(),
+        "Non-owner should not be able to renounce ownership"
+    );
+
+    // Verify ownership didn't change
+    assert_eq!(
+        session.owner(),
+        Some(*OWNER_ADDRESS),
+        "Ownership should remain unchanged after failed renounce"
+    );
+}
