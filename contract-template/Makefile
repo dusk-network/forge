@@ -1,25 +1,40 @@
 # =============================================================================
-# Test Bridge Contract Makefile
+# Dusk Contract Makefile Template
 # =============================================================================
-# This contract is used for testing the dusk-wasm macro.
+# Copy this entire directory to create a new contract.
 #
 # Prerequisites:
 #   - Rust nightly toolchain with wasm32-unknown-unknown target
 #   - jq (for parsing cargo metadata)
 #   - wasm-opt (optional, for smaller binaries: https://github.com/WebAssembly/binaryen)
 #   - cargo-expand (optional, for macro expansion: cargo install cargo-expand)
+#
+# Usage:
+#   make wasm       - Build optimized contract WASM
+#   make wasm-dd    - Build optimized data-driver WASM
+#   make all-wasm   - Build both contract and data-driver WASMs
+#   make test       - Run all tests
+#   make clippy     - Run clippy lints
+#   make expand     - Show macro-expanded contract code
+#   make clean      - Clean build artifacts
+#   make help       - Show all available targets
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Configuration
+# Configuration (override these as needed)
 # -----------------------------------------------------------------------------
 
+# Data-driver feature name (adjust to match your Cargo.toml)
 DD_FEATURE ?= data-driver-js
+
+# WASM optimization level: -O0, -O1, -O2, -O3, -O4, -Os, -Oz
 WASM_OPT_LEVEL ?= -Oz
+
+# Stack size for contract WASM (64KB default)
 STACK_SIZE ?= 65536
 
 # -----------------------------------------------------------------------------
-# Auto-detected variables
+# Auto-detected variables (do not modify)
 # -----------------------------------------------------------------------------
 
 CRATE_NAME_DASHED := $(shell cargo metadata --no-deps --format-version 1 \
@@ -106,20 +121,12 @@ $(CONTRACT_WASM_FILE): wasm
 $(DD_WASM_FILE): wasm-dd
 
 # -----------------------------------------------------------------------------
-# Test targets
+# Test target
 # -----------------------------------------------------------------------------
 
 .PHONY: test
-test: $(CONTRACT_WASM_FILE) $(DD_WASM_FILE) ## Run all tests
-	@cargo test --release --no-default-features
-
-.PHONY: test-contract
-test-contract: $(CONTRACT_WASM_FILE) ## Run contract tests only
-	@cargo test --release --no-default-features --test contract
-
-.PHONY: test-schema
-test-schema: $(DD_WASM_FILE) ## Run schema tests only
-	@cargo test --release --no-default-features --test schema
+test: $(CONTRACT_WASM_FILE) $(DD_WASM_FILE) ## Build WASMs and run tests
+	@cargo test --release
 
 # -----------------------------------------------------------------------------
 # Development tools
@@ -175,7 +182,7 @@ clean: ## Clean all build artifacts
 
 .PHONY: help
 help: ## Show this help message
-	@echo "Test Bridge Makefile - $(CRATE_NAME)"
+	@echo "Dusk Contract Makefile - $(CRATE_NAME)"
 	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""

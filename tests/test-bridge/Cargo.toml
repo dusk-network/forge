@@ -3,24 +3,14 @@ name = "test-bridge"
 version = "0.1.0"
 edition.workspace = true
 
-[features]
-# Default: build as contract WASM
-default = ["contract"]
-# Build as contract WASM (includes dusk-core with abi-dlmalloc)
-contract = ["dusk-core/abi-dlmalloc", "evm-core/abi"]
-# Build as data-driver WASM (mutually exclusive with contract)
-data-driver = ["dep:dusk-data-driver", "dusk-data-driver/wasm-export", "evm-core/serde", "dep:serde_json"]
-# Data-driver with alloc/dealloc exports for JavaScript environments
-data-driver-js = ["data-driver", "dusk-data-driver/alloc"]
-
-[dependencies]
-dusk-data-driver = { version = "0.3", optional = true }
-dusk-core = "1.4"
-serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }
-
 [target.'cfg(target_family = "wasm")'.dependencies]
-evm-core = { path = "../../../DuskEVM/L1Contracts/core" }
+dusk-core = "1.4"
+dusk-data-driver = { version = "0.3", optional = true }
 dusk-wasm = { path = "../.." }
+evm-core = { path = "../../../DuskEVM/L1Contracts/core" }
+serde_json = { version = "1", default-features = false, features = [
+  "alloc",
+], optional = true }
 
 [dev-dependencies]
 dusk-core = "1.4"
@@ -28,7 +18,10 @@ dusk-vm = { workspace = true, default-features = false }
 evm-core = { path = "../../../DuskEVM/L1Contracts/core" }
 tests-setup = { path = "../../../DuskEVM/L1Contracts/tests" }
 rand = "0.8"
-rkyv = { version = "0.7", default-features = false, features = ["alloc", "size_32"] }
+rkyv = { version = "0.7", default-features = false, features = [
+  "alloc",
+  "size_32",
+] }
 serde_json = "1"
 wasmtime = "25"
 # Pin to avoid edition2024 issues (resolved via workspace)
@@ -36,6 +29,19 @@ blake2b_simd = { workspace = true }
 blake3 = { workspace = true }
 constant_time_eq = { workspace = true }
 time-core = { workspace = true }
+
+[features]
+# Default: contract WASM build
+default = ["dusk-core/abi-dlmalloc", "evm-core/abi"]
+# Data-driver WASM (use with --no-default-features)
+data-driver = [
+  "dep:dusk-data-driver",
+  "dusk-data-driver/wasm-export",
+  "evm-core/serde",
+  "dep:serde_json",
+]
+# Data-driver with alloc exports for JavaScript environments
+data-driver-js = ["data-driver", "dusk-data-driver/alloc"]
 
 [lib]
 crate-type = ["cdylib"]
