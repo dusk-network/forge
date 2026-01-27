@@ -505,6 +505,45 @@ fn test_multiple_trait_implementations() {
     assert_eq!(session.owner(), Some(*OWNER_ADDRESS), "owner() should still work");
 }
 
+#[test]
+fn test_nested_generic_return_type() {
+    let mut session = TestBridgeSession::new();
+
+    // Add a pending withdrawal
+    let withdrawal = make_withdrawal_request(1, 1000);
+    session.add_pending_withdrawal(&OWNER_SK, withdrawal);
+
+    // Call pending_withdrawal_with_id which returns Option<(WithdrawalId, PendingWithdrawal)>
+    let id = WithdrawalId([1u8; 32]);
+    let result = session
+        .session
+        .direct_call::<_, Option<(WithdrawalId, PendingWithdrawal)>>(
+            TEST_BRIDGE_ID,
+            "pending_withdrawal_with_id",
+            &id,
+        )
+        .expect("pending_withdrawal_with_id should succeed");
+
+    // Verify the nested type is returned correctly
+    assert!(result.data.is_some(), "Should find the pending withdrawal");
+    let (returned_id, returned_pw) = result.data.unwrap();
+    assert_eq!(returned_id.0, [1u8; 32], "WithdrawalId should match");
+    assert_eq!(returned_pw.amount, 1000, "PendingWithdrawal amount should match");
+
+    // Test with non-existent ID
+    let missing_id = WithdrawalId([99u8; 32]);
+    let result = session
+        .session
+        .direct_call::<_, Option<(WithdrawalId, PendingWithdrawal)>>(
+            TEST_BRIDGE_ID,
+            "pending_withdrawal_with_id",
+            &missing_id,
+        )
+        .expect("pending_withdrawal_with_id should succeed");
+
+    assert!(result.data.is_none(), "Should return None for non-existent ID");
+}
+
 // =============================================================================
 // Streaming function tests (abi::feed integration)
 // =============================================================================

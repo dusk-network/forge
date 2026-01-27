@@ -974,6 +974,53 @@ fn test_schema_custom_flag() {
 }
 
 #[test]
+fn test_schema_nested_generic_types() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let functions = schema["functions"].as_array().expect("functions should be an array");
+
+    // Test pending_withdrawal_with_id which returns Option<(WithdrawalId, PendingWithdrawal)>
+    let fn_with_nested = functions
+        .iter()
+        .find(|f| f["name"] == "pending_withdrawal_with_id")
+        .expect("pending_withdrawal_with_id should exist");
+
+    let output_type = fn_with_nested["output"].as_str().unwrap();
+
+    // The output type should be a nested generic: Option containing a tuple
+    assert!(
+        output_type.contains("Option"),
+        "Output should be Option type: {output_type}"
+    );
+    assert!(
+        output_type.contains("WithdrawalId") || output_type.contains("("),
+        "Output should contain tuple or WithdrawalId: {output_type}"
+    );
+    assert!(
+        output_type.contains("PendingWithdrawal"),
+        "Output should contain PendingWithdrawal: {output_type}"
+    );
+
+    // Test that simpler Option types are also captured
+    let pending_withdrawal = functions
+        .iter()
+        .find(|f| f["name"] == "pending_withdrawal")
+        .expect("pending_withdrawal should exist");
+
+    let output_type = pending_withdrawal["output"].as_str().unwrap();
+    assert!(
+        output_type.contains("Option"),
+        "pending_withdrawal output should be Option: {output_type}"
+    );
+    assert!(
+        output_type.contains("PendingWithdrawal"),
+        "pending_withdrawal output should contain PendingWithdrawal: {output_type}"
+    );
+}
+
+#[test]
 fn test_schema_multiple_impl_blocks() {
     let schema_json = get_schema_from_wasm();
     let schema: serde_json::Value =

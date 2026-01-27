@@ -176,6 +176,17 @@ mod test_bridge {
             self.pending_withdrawals.get(&id).copied()
         }
 
+        /// Returns a pending withdrawal with its ID as a tuple.
+        ///
+        /// Tests nested generic types: `Option<(WithdrawalId, PendingWithdrawal)>`.
+        /// The schema should correctly capture this nested type structure.
+        pub fn pending_withdrawal_with_id(
+            &self,
+            id: WithdrawalId,
+        ) -> Option<(WithdrawalId, PendingWithdrawal)> {
+            self.pending_withdrawals.get(&id).map(|pw| (id, *pw))
+        }
+
         /// Returns a reference to the other bridge address.
         ///
         /// Tests that the macro correctly generates `.clone()` for reference returns.
