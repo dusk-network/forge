@@ -10,6 +10,8 @@ default = ["contract"]
 contract = ["dusk-core/abi-dlmalloc", "evm-core/abi"]
 # Build as data-driver WASM (mutually exclusive with contract)
 data-driver = ["dep:dusk-data-driver", "dusk-data-driver/wasm-export", "evm-core/serde", "dep:serde_json"]
+# Data-driver with alloc/dealloc exports for JavaScript environments
+data-driver-js = ["data-driver", "dusk-data-driver/alloc"]
 
 [dependencies]
 dusk-data-driver = { version = "0.3", optional = true }

@@ -4,6 +4,7 @@ CRATE_NAME := $(subst -,_,$(CRATE_NAME_DASHED))
 # Detect workspace root so we know where target/ actually lives
 WORKSPACE_ROOT := $(shell cargo metadata --no-deps --format-version 1 --manifest-path Cargo.toml | jq -r '.workspace_root')
 
+WASM_OPT ?= $(shell command -v wasm-opt 2>/dev/null)
 WASM_TARGET = wasm32-unknown-unknown
 
 # Contract WASM target directory
@@ -18,7 +19,11 @@ DD_WASM_FILE = $(DD_WASM_DIR)/$(CRATE_NAME).wasm
 
 all: wasm
 
-wasm: ## Generate contract WASM
+wasm: ## Generate optimized contract WASM
+	@if [ -z "$(WASM_OPT)" ]; then \
+		echo "wasm-opt not found. Install binaryen: https://github.com/WebAssembly/binaryen"; \
+		exit 1; \
+	fi
 	@echo "Building contract WASM for crate: $(CRATE_NAME)"
 	@CARGO_TARGET_DIR=$(CONTRACT_TARGET_DIR) \
 	  RUSTFLAGS="$(RUSTFLAGS) --remap-path-prefix $(HOME)= -C link-args=-zstack-size=65536" \
@@ -26,18 +31,26 @@ wasm: ## Generate contract WASM
 			--release \
 			--color=always \
 			--target $(WASM_TARGET)
+	@echo "Optimizing contract WASM..."
+	@wasm-opt -Oz --strip-debug $(WASM_FILE) -o $(WASM_FILE)
 	@echo "Contract WASM build complete:"
 	@$(MAKE) echo
 
-wasm-dd: ## Generate data-driver WASM
+wasm-dd: ## Generate optimized data-driver WASM
+	@if [ -z "$(WASM_OPT)" ]; then \
+		echo "wasm-opt not found. Install binaryen: https://github.com/WebAssembly/binaryen"; \
+		exit 1; \
+	fi
 	@echo "Building data-driver WASM for crate: $(CRATE_NAME)"
 	@CARGO_TARGET_DIR=$(DD_TARGET_DIR) \
 	  cargo build \
 			--release \
 			--no-default-features \
-			--features data-driver \
+			--features data-driver-js \
 			--color=always \
 			--target $(WASM_TARGET)
+	@echo "Optimizing data-driver WASM..."
+	@wasm-opt -Oz --strip-debug $(DD_WASM_FILE) -o $(DD_WASM_FILE)
 	@echo "Data-driver WASM build complete:"
 	@echo $(DD_WASM_FILE)
 
@@ -67,7 +80,7 @@ expand-dd: ## Print expanded data-driver code
 		exit 1; \
 	fi
 	@echo "Expanding data-driver macros for crate: $(CRATE_NAME)"
-	@cargo expand --release --no-default-features --features data-driver --target $(WASM_TARGET)
+	@cargo expand --release --no-default-features --features data-driver-js --target $(WASM_TARGET)
 
 test: wasm wasm-dd ## Run all tests (contract + schema)
 	@cargo test --release --no-default-features \
