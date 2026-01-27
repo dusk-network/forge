@@ -168,6 +168,24 @@ mod test_bridge {
             withdrawal.amount > 0 && withdrawal.block_height > 0
         }
 
+        /// Initiates a bridge transfer with explicit parameters.
+        ///
+        /// Tests tuple parameter handling - the macro creates a tuple input type
+        /// `(EVMAddress, DSAddress, u64)` for the three parameters.
+        pub fn initiate_transfer(&mut self, from: EVMAddress, to: DSAddress, amount: u64) {
+            assert!(!self.is_paused, "bridge is paused");
+            abi::emit(
+                events::BridgeInitiated::TOPIC,
+                events::BridgeInitiated {
+                    from: Some(to),
+                    to: from,
+                    amount,
+                    deposit_fee: 0,
+                    extra_data: alloc::vec::Vec::new(),
+                },
+            );
+        }
+
         /// Adds a pending withdrawal.
         pub fn add_pending_withdrawal(&mut self, withdrawal: WithdrawalRequest) {
             let id = withdrawal.id;

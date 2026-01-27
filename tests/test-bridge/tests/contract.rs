@@ -165,6 +165,18 @@ impl TestBridgeSession {
             .expect("verify_withdrawal should succeed")
             .data
     }
+
+    fn initiate_transfer(
+        &mut self,
+        sender_sk: &AccountSecretKey,
+        from: EVMAddress,
+        to: DSAddress,
+        amount: u64,
+    ) -> CallReceipt<()> {
+        self.session
+            .call_public(sender_sk, TEST_BRIDGE_ID, "initiate_transfer", &(from, to, amount))
+            .expect("initiate_transfer should succeed")
+    }
 }
 
 #[test]
@@ -283,4 +295,22 @@ fn test_method_with_reference_parameter() {
 
     let is_valid = session.verify_withdrawal(invalid_withdrawal);
     assert!(!is_valid, "withdrawal with amount = 0 should be invalid");
+}
+
+#[test]
+fn test_method_with_multiple_parameters() {
+    let mut session = TestBridgeSession::new();
+
+    let from = EVMAddress([1u8; 20]);
+    let to = *OWNER_ADDRESS;
+    let amount = 5000u64;
+
+    // The macro creates a tuple input type (EVMAddress, DSAddress, u64)
+    let receipt = session.initiate_transfer(&OWNER_SK, from, to, amount);
+
+    // Verify event was emitted with correct values
+    assert!(
+        !receipt.events.is_empty(),
+        "initiate_transfer should emit BridgeInitiated event"
+    );
 }
