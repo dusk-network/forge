@@ -960,4 +960,122 @@ mod tests {
 
         assert!(result.is_ok(), "method without abi::feed() should not require attribute");
     }
+
+    #[test]
+    fn test_validate_feeds_in_loop() {
+        // abi::feed() inside a loop is still detected as a single call site
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn stream_in_loop(&self) {
+                for item in &self.items {
+                    abi::feed(*item);
+                }
+            }
+        };
+        let name = format_ident!("stream_in_loop");
+        let feed_type: TokenStream2 = quote! { u64 };
+        let result = validate_feeds(&method, &name, &Some(feed_type));
+
+        // A single feed call inside a loop is valid
+        assert!(result.is_ok(), "single feed call in loop should be valid");
+    }
+
+    #[test]
+    fn test_validate_feeds_multiple_in_loop() {
+        // Multiple abi::feed() calls even inside a loop should error
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn stream_multiple_in_loop(&self) {
+                for item in &self.items {
+                    abi::feed(item.id);
+                    abi::feed(item.value);
+                }
+            }
+        };
+        let name = format_ident!("stream_multiple_in_loop");
+        let feed_type: TokenStream2 = quote! { u64 };
+        let result = validate_feeds(&method, &name, &Some(feed_type));
+
+        let Err(err) = result else {
+            panic!("expected error for multiple feed calls in loop");
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("multiple"), "error should mention 'multiple': {msg}");
+    }
+
+    #[test]
+    fn test_validate_feeds_in_if_block() {
+        // abi::feed() inside an if block is still detected
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn stream_conditional(&self) {
+                if self.is_ready {
+                    abi::feed(self.data);
+                }
+            }
+        };
+        let name = format_ident!("stream_conditional");
+        let feed_type: TokenStream2 = quote! { u64 };
+        let result = validate_feeds(&method, &name, &Some(feed_type));
+
+        assert!(result.is_ok(), "single feed call in if block should be valid");
+    }
+
+    #[test]
+    fn test_validate_feeds_in_multiple_branches() {
+        // abi::feed() in multiple if/else branches counts as multiple call sites
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn stream_branches(&self) {
+                if self.use_a {
+                    abi::feed(self.a);
+                } else {
+                    abi::feed(self.b);
+                }
+            }
+        };
+        let name = format_ident!("stream_branches");
+        let feed_type: TokenStream2 = quote! { u64 };
+        let result = validate_feeds(&method, &name, &Some(feed_type));
+
+        let Err(err) = result else {
+            panic!("expected error for feed calls in multiple branches");
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("multiple"), "error should mention 'multiple': {msg}");
+    }
+
+    #[test]
+    fn test_validate_feeds_tuple_to_non_tuple_mismatch() {
+        // Feed type is tuple but expression is non-tuple
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn stream_wants_tuple(&self) {
+                abi::feed(42u64);
+            }
+        };
+        let name = format_ident!("stream_wants_tuple");
+        let feed_type: TokenStream2 = quote! { (u64, String) };
+        let result = validate_feeds(&method, &name, &Some(feed_type));
+
+        let Err(err) = result else {
+            panic!("expected error for tuple mismatch");
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("tuple"), "error should mention 'tuple': {msg}");
+    }
+
+    #[test]
+    fn test_validate_feeds_non_tuple_to_tuple_mismatch() {
+        // Feed type is non-tuple but expression is tuple
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn stream_sends_tuple(&self) {
+                abi::feed((self.id, self.value));
+            }
+        };
+        let name = format_ident!("stream_sends_tuple");
+        let feed_type: TokenStream2 = quote! { u64 };
+        let result = validate_feeds(&method, &name, &Some(feed_type));
+
+        let Err(err) = result else {
+            panic!("expected error for tuple mismatch");
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("tuple"), "error should mention 'tuple': {msg}");
+    }
 }
