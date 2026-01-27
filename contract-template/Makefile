@@ -59,6 +59,30 @@ DD_WASM_DIR := $(DD_TARGET_DIR)/$(WASM_TARGET)/release
 DD_WASM_FILE := $(DD_WASM_DIR)/$(CRATE_NAME).wasm
 
 # -----------------------------------------------------------------------------
+# Reusable macros
+# -----------------------------------------------------------------------------
+
+# Usage: $(call optimize-wasm,path/to/file.wasm)
+define optimize-wasm
+	@if [ -n "$(WASM_OPT)" ]; then \
+		echo "Optimizing with wasm-opt $(WASM_OPT_LEVEL)..."; \
+		wasm-opt $(WASM_OPT_LEVEL) --strip-debug $(1) -o $(1); \
+	else \
+		echo "Note: wasm-opt not found, skipping optimization."; \
+		echo "Install binaryen for smaller binaries: https://github.com/WebAssembly/binaryen"; \
+	fi
+endef
+
+# Usage: $(call require-tool,tool-name,install-command)
+define require-tool
+	@if ! command -v $(1) >/dev/null 2>&1; then \
+		echo "Error: $(1) not found."; \
+		echo "Install with: $(2)"; \
+		exit 1; \
+	fi
+endef
+
+# -----------------------------------------------------------------------------
 # Default target
 # -----------------------------------------------------------------------------
 
@@ -79,13 +103,7 @@ wasm: ## Build contract WASM (optimizes if wasm-opt available)
 			--release \
 			--color=always \
 			--target $(WASM_TARGET)
-	@if [ -n "$(WASM_OPT)" ]; then \
-		echo "Optimizing with wasm-opt $(WASM_OPT_LEVEL)..."; \
-		wasm-opt $(WASM_OPT_LEVEL) --strip-debug $(CONTRACT_WASM_FILE) -o $(CONTRACT_WASM_FILE); \
-	else \
-		echo "Note: wasm-opt not found, skipping optimization."; \
-		echo "Install binaryen for smaller binaries: https://github.com/WebAssembly/binaryen"; \
-	fi
+	$(call optimize-wasm,$(CONTRACT_WASM_FILE))
 	@echo "Contract WASM: $(CONTRACT_WASM_FILE)"
 
 .PHONY: wasm-dd
@@ -101,13 +119,7 @@ wasm-dd: ## Build data-driver WASM (optimizes if wasm-opt available)
 			--features $(DD_FEATURE) \
 			--color=always \
 			--target $(WASM_TARGET)
-	@if [ -n "$(WASM_OPT)" ]; then \
-		echo "Optimizing with wasm-opt $(WASM_OPT_LEVEL)..."; \
-		wasm-opt $(WASM_OPT_LEVEL) --strip-debug $(DD_WASM_FILE) -o $(DD_WASM_FILE); \
-	else \
-		echo "Note: wasm-opt not found, skipping optimization."; \
-		echo "Install binaryen for smaller binaries: https://github.com/WebAssembly/binaryen"; \
-	fi
+	$(call optimize-wasm,$(DD_WASM_FILE))
 	@echo "Data-driver WASM: $(DD_WASM_FILE)"
 
 .PHONY: all-wasm
@@ -141,21 +153,13 @@ clippy: ## Run clippy with strict warnings
 
 .PHONY: expand
 expand: ## Show macro-expanded contract code
-	@if ! command -v cargo-expand >/dev/null 2>&1; then \
-		echo "Error: cargo-expand not found."; \
-		echo "Install with: cargo install cargo-expand"; \
-		exit 1; \
-	fi
+	$(call require-tool,cargo-expand,cargo install cargo-expand)
 	@echo "Expanding macros for: $(CRATE_NAME)"
 	@cargo expand --release --target $(WASM_TARGET)
 
 .PHONY: expand-dd
 expand-dd: ## Show macro-expanded data-driver code
-	@if ! command -v cargo-expand >/dev/null 2>&1; then \
-		echo "Error: cargo-expand not found."; \
-		echo "Install with: cargo install cargo-expand"; \
-		exit 1; \
-	fi
+	$(call require-tool,cargo-expand,cargo install cargo-expand)
 	@echo "Expanding data-driver macros for: $(CRATE_NAME)"
 	@cargo expand --release --no-default-features --features $(DD_FEATURE) --target $(WASM_TARGET)
 

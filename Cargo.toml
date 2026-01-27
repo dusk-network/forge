@@ -15,6 +15,7 @@ evm-core = { path = "../DuskEVM/L1Contracts/core" }
 [workspace]
 resolver = "2"
 members = ["contract-macro", "tests/test-bridge"]
+exclude = ["contract-template"]
 
 [workspace.package]
 edition = "2021"
