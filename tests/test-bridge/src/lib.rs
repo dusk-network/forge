@@ -151,6 +151,14 @@ mod test_bridge {
             self.pending_withdrawals.get(&id).copied()
         }
 
+        /// Returns a reference to the other bridge address.
+        ///
+        /// Tests that the macro correctly generates `.clone()` for reference returns.
+        /// The macro should transform this to `STATE.other_bridge_ref().clone()`.
+        pub fn other_bridge_ref(&self) -> &EVMAddress {
+            &self.other_bridge
+        }
+
         /// Adds a pending withdrawal.
         pub fn add_pending_withdrawal(&mut self, withdrawal: WithdrawalRequest) {
             let id = withdrawal.id;

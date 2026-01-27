@@ -19,7 +19,7 @@ use dusk_core::abi::ContractId;
 use dusk_core::dusk;
 use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as AccountSecretKey};
 use dusk_vm::CallReceipt;
-use evm_core::standard_bridge::EVMAddress;
+use evm_core::standard_bridge::{EVMAddress, SetEVMAddressOrOffset};
 use evm_core::Address as DSAddress;
 
 use rand::rngs::StdRng;
@@ -141,6 +141,23 @@ impl TestBridgeSession {
             .call_public(sender_sk, TEST_BRIDGE_ID, "unpause", &())
             .expect("unpause should succeed")
     }
+
+    fn set_evm_address_or_offset(
+        &mut self,
+        sender_sk: &AccountSecretKey,
+        value: SetEVMAddressOrOffset,
+    ) -> CallReceipt<()> {
+        self.session
+            .call_public(sender_sk, TEST_BRIDGE_ID, "set_evm_address_or_offset", &value)
+            .expect("set_evm_address_or_offset should succeed")
+    }
+
+    fn other_bridge_ref(&mut self) -> EVMAddress {
+        self.session
+            .direct_call::<_, EVMAddress>(TEST_BRIDGE_ID, "other_bridge_ref", &())
+            .expect("other_bridge_ref should succeed")
+            .data
+    }
 }
 
 #[test]
@@ -209,4 +226,25 @@ fn test_pause_emits_event() {
 
     // Check that pause event was emitted
     assert!(!receipt.events.is_empty(), "pause should emit an event");
+}
+
+#[test]
+fn test_method_returning_reference() {
+    let mut session = TestBridgeSession::new();
+
+    // Initially the other_bridge is zeroed
+    let other_bridge = session.other_bridge_ref();
+    assert_eq!(other_bridge, EVMAddress([0u8; 20]));
+
+    // Set a new other_bridge address
+    let new_addr = EVMAddress([42u8; 20]);
+    session.set_evm_address_or_offset(&OWNER_SK, SetEVMAddressOrOffset::OtherBridge(new_addr));
+
+    // Call the method that returns a reference
+    // The macro should have generated .clone() so this works
+    let other_bridge = session.other_bridge_ref();
+    assert_eq!(other_bridge, new_addr);
+
+    // Verify the regular getter returns the same value
+    assert_eq!(session.other_bridge(), other_bridge);
 }
