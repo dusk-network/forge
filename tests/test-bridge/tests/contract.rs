@@ -13,13 +13,16 @@
 
 extern crate alloc;
 
+use std::sync::mpsc;
 use std::sync::LazyLock;
 
 use dusk_core::abi::ContractId;
 use dusk_core::dusk;
 use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as AccountSecretKey};
 use dusk_vm::CallReceipt;
-use evm_core::standard_bridge::{EVMAddress, PendingWithdrawal, SetEVMAddressOrOffset};
+use evm_core::standard_bridge::{
+    EVMAddress, PendingWithdrawal, SetEVMAddressOrOffset, WithdrawalId, WithdrawalRequest,
+};
 use evm_core::Address as DSAddress;
 
 use rand::rngs::StdRng;
@@ -177,6 +180,46 @@ impl TestBridgeSession {
             .call_public(sender_sk, TEST_BRIDGE_ID, "initiate_transfer", &(from, to, amount))
             .expect("initiate_transfer should succeed")
     }
+
+    fn add_pending_withdrawal(
+        &mut self,
+        sender_sk: &AccountSecretKey,
+        withdrawal: WithdrawalRequest,
+    ) -> CallReceipt<()> {
+        self.session
+            .call_public(sender_sk, TEST_BRIDGE_ID, "add_pending_withdrawal", &withdrawal)
+            .expect("add_pending_withdrawal should succeed")
+    }
+
+    /// Call the pending_withdrawals streaming function and collect all fed tuples.
+    fn collect_pending_withdrawals(&mut self) -> Vec<(WithdrawalId, PendingWithdrawal)> {
+        let (sender, receiver) = mpsc::channel();
+
+        self.session
+            .feeder_call::<_, ()>(TEST_BRIDGE_ID, "pending_withdrawals", &(), sender)
+            .expect("pending_withdrawals feeder_call should succeed");
+
+        receiver
+            .into_iter()
+            .map(|data| {
+                tests_setup::rkyv_deserialize::<(WithdrawalId, PendingWithdrawal)>(&data)
+            })
+            .collect()
+    }
+
+    /// Call the pending_withdrawal_ids streaming function and collect all fed IDs.
+    fn collect_pending_withdrawal_ids(&mut self) -> Vec<WithdrawalId> {
+        let (sender, receiver) = mpsc::channel();
+
+        self.session
+            .feeder_call::<_, ()>(TEST_BRIDGE_ID, "pending_withdrawal_ids", &(), sender)
+            .expect("pending_withdrawal_ids feeder_call should succeed");
+
+        receiver
+            .into_iter()
+            .map(|data| tests_setup::rkyv_deserialize::<WithdrawalId>(&data))
+            .collect()
+    }
 }
 
 #[test]
@@ -316,7 +359,7 @@ fn test_method_with_multiple_parameters() {
 }
 
 // =============================================================================
-// Trait default implementation tests (Task 10)
+// Trait default implementation tests
 // =============================================================================
 //
 // These tests verify that empty trait method bodies correctly trigger
@@ -412,5 +455,132 @@ fn test_trait_default_renounce_only_owner() {
         session.owner(),
         Some(*OWNER_ADDRESS),
         "Ownership should remain unchanged after failed renounce"
+    );
+}
+
+// =============================================================================
+// Streaming function tests (abi::feed integration)
+// =============================================================================
+//
+// These tests verify that functions using `abi::feed()` with the
+// `#[contract(feeds = "Type")]` attribute work correctly end-to-end.
+
+/// Helper to create a WithdrawalRequest for testing.
+fn make_withdrawal_request(id_byte: u8, amount_lux: u64) -> WithdrawalRequest {
+    // Use the WithdrawalRequest::new constructor which properly encodes
+    // the destination address in extra_data format
+    WithdrawalRequest::new(
+        WithdrawalId([id_byte; 32]),
+        EVMAddress([id_byte; 20]),
+        *OWNER_PK, // destination public key
+        amount_lux,
+        vec![], // no additional extra_data
+    )
+}
+
+#[test]
+fn test_streaming_function_empty() {
+    let mut session = TestBridgeSession::new();
+
+    // Call streaming function with no pending withdrawals
+    let results = session.collect_pending_withdrawals();
+    assert!(results.is_empty(), "Should return empty when no pending withdrawals");
+
+    // Same for IDs only
+    let ids = session.collect_pending_withdrawal_ids();
+    assert!(ids.is_empty(), "Should return empty IDs when no pending withdrawals");
+}
+
+#[test]
+fn test_streaming_function_single_withdrawal() {
+    let mut session = TestBridgeSession::new();
+
+    // Add a pending withdrawal
+    let withdrawal = make_withdrawal_request(1, 1000);
+    session.add_pending_withdrawal(&OWNER_SK, withdrawal);
+
+    // Call streaming function - should feed one tuple
+    let results = session.collect_pending_withdrawals();
+    assert_eq!(results.len(), 1, "Should have exactly one pending withdrawal");
+
+    let (id, pending) = &results[0];
+    assert_eq!(id.0, [1u8; 32], "WithdrawalId should match");
+    assert_eq!(pending.from, EVMAddress([1u8; 20]), "from address should match");
+    assert_eq!(pending.amount, 1000, "amount should match (converted to LUX)");
+
+    // Test IDs only streaming function
+    let ids = session.collect_pending_withdrawal_ids();
+    assert_eq!(ids.len(), 1, "Should have exactly one ID");
+    assert_eq!(ids[0].0, [1u8; 32], "ID should match");
+}
+
+#[test]
+fn test_streaming_function_multiple_withdrawals() {
+    let mut session = TestBridgeSession::new();
+
+    // Add multiple pending withdrawals
+    for i in 1..=5u8 {
+        let withdrawal = make_withdrawal_request(i, (i as u64) * 1000);
+        session.add_pending_withdrawal(&OWNER_SK, withdrawal);
+    }
+
+    // Call streaming function - should feed all withdrawals
+    let results = session.collect_pending_withdrawals();
+    assert_eq!(results.len(), 5, "Should have 5 pending withdrawals");
+
+    // Verify all withdrawals are present (order may vary due to BTreeMap)
+    let mut found_ids: Vec<u8> = results.iter().map(|(id, _)| id.0[0]).collect();
+    found_ids.sort();
+    assert_eq!(found_ids, vec![1, 2, 3, 4, 5], "All withdrawal IDs should be present");
+
+    // Verify amounts match their IDs
+    for (id, pending) in &results {
+        let expected_amount = (id.0[0] as u64) * 1000;
+        assert_eq!(
+            pending.amount, expected_amount,
+            "Amount for ID {} should be {}",
+            id.0[0], expected_amount
+        );
+    }
+
+    // Test IDs only streaming function
+    let ids = session.collect_pending_withdrawal_ids();
+    assert_eq!(ids.len(), 5, "Should have 5 IDs");
+
+    let mut id_bytes: Vec<u8> = ids.iter().map(|id| id.0[0]).collect();
+    id_bytes.sort();
+    assert_eq!(id_bytes, vec![1, 2, 3, 4, 5], "All IDs should be present");
+}
+
+#[test]
+fn test_streaming_function_after_finalization() {
+    let mut session = TestBridgeSession::new();
+
+    // Add withdrawals
+    for i in 1..=3u8 {
+        let withdrawal = make_withdrawal_request(i, (i as u64) * 1000);
+        session.add_pending_withdrawal(&OWNER_SK, withdrawal);
+    }
+
+    // Verify we have 3 withdrawals
+    let results = session.collect_pending_withdrawals();
+    assert_eq!(results.len(), 3, "Should have 3 pending withdrawals initially");
+
+    // Finalize one withdrawal (ID = 2)
+    let id_to_finalize = WithdrawalId([2u8; 32]);
+    session
+        .session
+        .call_public::<_, ()>(&OWNER_SK, TEST_BRIDGE_ID, "finalize_withdrawal", &id_to_finalize)
+        .expect("finalize_withdrawal should succeed");
+
+    // Streaming should now return only 2 withdrawals
+    let results = session.collect_pending_withdrawals();
+    assert_eq!(results.len(), 2, "Should have 2 pending withdrawals after finalization");
+
+    // Verify the finalized one is gone
+    let remaining_ids: Vec<u8> = results.iter().map(|(id, _)| id.0[0]).collect();
+    assert!(
+        !remaining_ids.contains(&2),
+        "Finalized withdrawal should not be in results"
     );
 }

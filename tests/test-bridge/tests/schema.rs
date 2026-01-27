@@ -720,7 +720,7 @@ fn test_decode_event_unknown_topic() {
 }
 
 // =============================================================================
-// Schema detail verification tests (Task 7)
+// Schema detail verification tests
 // =============================================================================
 
 #[test]
