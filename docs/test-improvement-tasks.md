@@ -734,10 +734,10 @@ mod tests {
 
 ### Acceptance Criteria
 
-- [ ] At least 7 unit tests for `EmitVisitor` and utility functions
-- [ ] Tests cover: simple emit, const topic, multiple emits, nested emits
-- [ ] Tests for `extract_doc_comment` and `has_custom_attribute`
-- [ ] All tests pass with `cargo test -p contract-macro`
+- [x] At least 7 unit tests for `EmitVisitor` and utility functions (added 18 tests)
+- [x] Tests cover: simple emit, const topic, multiple emits, nested in if/loop, without abi prefix
+- [x] Tests for `extract_doc_comment` (5 tests) and `has_custom_attribute` (5 tests)
+- [x] All tests pass with `cargo test -p contract-macro` (123 total tests)
 
 ---
 
@@ -876,7 +876,7 @@ fn test_trait_default_only_owner_check() {
 | 5. Event decoding test | Medium | [x] |
 | 6. Negative integration tests | Medium | [x] |
 | 7. Schema detail tests | Low | [x] |
-| 8. `EmitVisitor` unit tests | Low | [ ] |
+| 8. `EmitVisitor` unit tests | Low | [x] |
 | 9. Multiple impl blocks test | Low | [ ] |
 | 10. Trait default impl test | Low | [ ] |
 

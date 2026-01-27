@@ -585,3 +585,249 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     output.into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syn::visit::Visit;
+
+    // =========================================================================
+    // EmitVisitor tests
+    // =========================================================================
+
+    #[test]
+    fn test_emit_visitor_finds_emit_call() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn pause(&mut self) {
+                    self.is_paused = true;
+                    abi::emit("paused", PauseEvent {});
+                }
+            }
+        };
+
+        let mut visitor = EmitVisitor::new();
+        visitor.visit_item_impl(&impl_block);
+
+        assert_eq!(visitor.events.len(), 1);
+        assert_eq!(visitor.events[0].topic, "paused");
+    }
+
+    #[test]
+    fn test_emit_visitor_finds_const_topic() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn pause(&mut self) {
+                    abi::emit(events::PauseToggled::PAUSED, events::PauseToggled());
+                }
+            }
+        };
+
+        let mut visitor = EmitVisitor::new();
+        visitor.visit_item_impl(&impl_block);
+
+        assert_eq!(visitor.events.len(), 1);
+        assert_eq!(visitor.events[0].topic, "events::PauseToggled::PAUSED");
+    }
+
+    #[test]
+    fn test_emit_visitor_multiple_emits() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn transfer(&mut self) {
+                    abi::emit("started", StartEvent {});
+                    // do work
+                    abi::emit("completed", CompleteEvent {});
+                }
+            }
+        };
+
+        let mut visitor = EmitVisitor::new();
+        visitor.visit_item_impl(&impl_block);
+
+        assert_eq!(visitor.events.len(), 2);
+    }
+
+    #[test]
+    fn test_emit_visitor_nested_in_if() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn maybe_emit(&mut self, condition: bool) {
+                    if condition {
+                        abi::emit("conditional", Event {});
+                    }
+                }
+            }
+        };
+
+        let mut visitor = EmitVisitor::new();
+        visitor.visit_item_impl(&impl_block);
+
+        assert_eq!(visitor.events.len(), 1);
+        assert_eq!(visitor.events[0].topic, "conditional");
+    }
+
+    #[test]
+    fn test_emit_visitor_nested_in_loop() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn emit_many(&mut self, items: Vec<u32>) {
+                    for item in items {
+                        abi::emit("item_processed", ItemEvent { value: item });
+                    }
+                }
+            }
+        };
+
+        let mut visitor = EmitVisitor::new();
+        visitor.visit_item_impl(&impl_block);
+
+        assert_eq!(visitor.events.len(), 1);
+    }
+
+    #[test]
+    fn test_emit_visitor_just_emit_without_abi_prefix() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn do_something(&mut self) {
+                    emit("event", SomeEvent {});
+                }
+            }
+        };
+
+        let mut visitor = EmitVisitor::new();
+        visitor.visit_item_impl(&impl_block);
+
+        assert_eq!(visitor.events.len(), 1);
+        assert_eq!(visitor.events[0].topic, "event");
+    }
+
+    #[test]
+    fn test_emit_visitor_no_emit_calls() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn get_value(&self) -> u64 {
+                    self.value
+                }
+            }
+        };
+
+        let mut visitor = EmitVisitor::new();
+        visitor.visit_item_impl(&impl_block);
+
+        assert_eq!(visitor.events.len(), 0);
+    }
+
+    #[test]
+    fn test_emit_visitor_across_multiple_methods() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn pause(&mut self) {
+                    abi::emit("paused", PauseEvent {});
+                }
+                pub fn unpause(&mut self) {
+                    abi::emit("unpaused", UnpauseEvent {});
+                }
+            }
+        };
+
+        let mut visitor = EmitVisitor::new();
+        visitor.visit_item_impl(&impl_block);
+
+        assert_eq!(visitor.events.len(), 2);
+    }
+
+    // =========================================================================
+    // extract_doc_comment tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_doc_comment_single_line() {
+        let attrs: Vec<Attribute> = vec![syn::parse_quote!(#[doc = " First line."])];
+
+        let doc = extract_doc_comment(&attrs);
+        assert!(doc.is_some());
+        assert_eq!(doc.unwrap(), "First line.");
+    }
+
+    #[test]
+    fn test_extract_doc_comment_multiple_lines() {
+        let attrs: Vec<Attribute> = vec![
+            syn::parse_quote!(#[doc = " First line."]),
+            syn::parse_quote!(#[doc = " Second line."]),
+        ];
+
+        let doc = extract_doc_comment(&attrs);
+        assert!(doc.is_some());
+        let doc = doc.unwrap();
+        assert!(doc.contains("First line"));
+        assert!(doc.contains("Second line"));
+    }
+
+    #[test]
+    fn test_extract_doc_comment_none() {
+        let attrs: Vec<Attribute> = vec![syn::parse_quote!(#[inline])];
+
+        let doc = extract_doc_comment(&attrs);
+        assert!(doc.is_none());
+    }
+
+    #[test]
+    fn test_extract_doc_comment_empty() {
+        let attrs: Vec<Attribute> = vec![];
+
+        let doc = extract_doc_comment(&attrs);
+        assert!(doc.is_none());
+    }
+
+    #[test]
+    fn test_extract_doc_comment_mixed_attrs() {
+        let attrs: Vec<Attribute> = vec![
+            syn::parse_quote!(#[inline]),
+            syn::parse_quote!(#[doc = " The doc comment."]),
+            syn::parse_quote!(#[allow(unused)]),
+        ];
+
+        let doc = extract_doc_comment(&attrs);
+        assert!(doc.is_some());
+        assert_eq!(doc.unwrap(), "The doc comment.");
+    }
+
+    // =========================================================================
+    // has_custom_attribute tests
+    // =========================================================================
+
+    #[test]
+    fn test_has_custom_attribute_true() {
+        let attrs: Vec<Attribute> = vec![syn::parse_quote!(#[contract(custom)])];
+        assert!(has_custom_attribute(&attrs));
+    }
+
+    #[test]
+    fn test_has_custom_attribute_false() {
+        let attrs: Vec<Attribute> = vec![syn::parse_quote!(#[doc = "Some doc"])];
+        assert!(!has_custom_attribute(&attrs));
+    }
+
+    #[test]
+    fn test_has_custom_attribute_empty() {
+        let attrs: Vec<Attribute> = vec![];
+        assert!(!has_custom_attribute(&attrs));
+    }
+
+    #[test]
+    fn test_has_custom_attribute_other_contract_attr() {
+        let attrs: Vec<Attribute> = vec![syn::parse_quote!(#[contract(expose = [foo])])];
+        assert!(!has_custom_attribute(&attrs));
+    }
+
+    #[test]
+    fn test_has_custom_attribute_mixed() {
+        let attrs: Vec<Attribute> = vec![
+            syn::parse_quote!(#[doc = "Some doc"]),
+            syn::parse_quote!(#[contract(custom)]),
+            syn::parse_quote!(#[inline]),
+        ];
+        assert!(has_custom_attribute(&attrs));
+    }
+}
