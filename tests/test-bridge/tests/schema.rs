@@ -258,6 +258,21 @@ impl DataDriverWasm {
 
     /// Call decode_output_fn via the WASM interface.
     fn decode_output(&mut self, fn_name: &str, rkyv: &[u8]) -> Result<serde_json::Value, String> {
+        self.decode_with_name("decode_output_fn", fn_name, rkyv)
+    }
+
+    /// Call decode_event via the WASM interface.
+    fn decode_event(&mut self, event_name: &str, rkyv: &[u8]) -> Result<serde_json::Value, String> {
+        self.decode_with_name("decode_event", event_name, rkyv)
+    }
+
+    /// Generic decode helper for decode_output_fn and decode_event.
+    fn decode_with_name(
+        &mut self,
+        wasm_fn: &str,
+        name: &str,
+        rkyv: &[u8],
+    ) -> Result<serde_json::Value, String> {
         let memory = self
             .instance
             .get_memory(&mut self.store, "memory")
@@ -265,20 +280,17 @@ impl DataDriverWasm {
 
         let decode_fn = self
             .instance
-            .get_typed_func::<(i32, i32, i32, i32, i32, i32), i32>(
-                &mut self.store,
-                "decode_output_fn",
-            )
-            .expect("Failed to get decode_output_fn function");
+            .get_typed_func::<(i32, i32, i32, i32, i32, i32), i32>(&mut self.store, wasm_fn)
+            .unwrap_or_else(|_| panic!("Failed to get {wasm_fn} function"));
 
-        // Write fn_name to memory
-        let fn_name_offset = 1024;
-        let fn_name_bytes = fn_name.as_bytes();
-        memory.data_mut(&mut self.store)[fn_name_offset..fn_name_offset + fn_name_bytes.len()]
-            .copy_from_slice(fn_name_bytes);
+        // Write name to memory
+        let name_offset = 1024;
+        let name_bytes = name.as_bytes();
+        memory.data_mut(&mut self.store)[name_offset..name_offset + name_bytes.len()]
+            .copy_from_slice(name_bytes);
 
         // Write rkyv data to memory
-        let rkyv_offset = fn_name_offset + 256;
+        let rkyv_offset = name_offset + 256;
         memory.data_mut(&mut self.store)[rkyv_offset..rkyv_offset + rkyv.len()]
             .copy_from_slice(rkyv);
 
@@ -290,15 +302,15 @@ impl DataDriverWasm {
             .call(
                 &mut self.store,
                 (
-                    fn_name_offset as i32,
-                    fn_name_bytes.len() as i32,
+                    name_offset as i32,
+                    name_bytes.len() as i32,
                     rkyv_offset as i32,
                     rkyv.len() as i32,
                     out_offset as i32,
                     out_size as i32,
                 ),
             )
-            .expect("Failed to call decode_output_fn");
+            .unwrap_or_else(|_| panic!("Failed to call {wasm_fn}"));
 
         if result != 0 {
             // Read error message
@@ -506,4 +518,117 @@ fn test_feed_function_simple_type_decode() {
         );
     }
     // Could also be an array depending on serialization - just verify it exists
+}
+
+// =============================================================================
+// Tests for decode_event (using actual contract events)
+// =============================================================================
+
+use std::sync::LazyLock;
+
+use dusk_core::abi::ContractId;
+use dusk_core::dusk;
+use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as AccountSecretKey};
+use evm_core::standard_bridge::{Deposit, EVMAddress};
+use evm_core::Address as DSAddress;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+use tests_setup::TestSession;
+
+const TEST_BRIDGE_BYTECODE: &[u8] =
+    include_bytes!("../../../target/contract/wasm32-unknown-unknown/release/test_bridge.wasm");
+const TEST_BRIDGE_ID: ContractId = ContractId::from_bytes([1; 32]);
+const DEPLOYER: [u8; 64] = [0u8; 64];
+const INITIAL_BALANCE: u64 = dusk(1_000.0);
+
+static OWNER_SK: LazyLock<AccountSecretKey> = LazyLock::new(|| {
+    let mut rng = StdRng::seed_from_u64(0x5EAF00D);
+    AccountSecretKey::random(&mut rng)
+});
+static OWNER_PK: LazyLock<AccountPublicKey> =
+    LazyLock::new(|| AccountPublicKey::from(&*OWNER_SK));
+static OWNER_ADDRESS: LazyLock<DSAddress> = LazyLock::new(|| DSAddress::from(*OWNER_PK));
+
+/// Set up a contract session for event tests.
+fn setup_contract_session() -> TestSession {
+    let mut session = TestSession::instantiate(vec![(&*OWNER_PK, INITIAL_BALANCE)], vec![]);
+
+    session
+        .deploy(
+            TEST_BRIDGE_BYTECODE,
+            dusk_vm::ContractData::builder()
+                .owner(DEPLOYER)
+                .init_arg(&(*OWNER_ADDRESS,))
+                .contract_id(TEST_BRIDGE_ID),
+        )
+        .expect("Deploying test-bridge should succeed");
+
+    session
+}
+
+#[test]
+fn test_decode_event_pause_toggled() {
+    // 1. Call the contract to emit a real event
+    let mut session = setup_contract_session();
+    let receipt = session
+        .call_public::<_, ()>(&OWNER_SK, TEST_BRIDGE_ID, "pause", &())
+        .expect("pause should succeed");
+
+    // 2. Extract the event from the receipt
+    assert!(!receipt.events.is_empty(), "pause should emit an event");
+    let event = &receipt.events[0];
+    assert_eq!(event.topic, "bridge_paused");
+
+    // 3. Decode the event using the data-driver
+    let mut driver = DataDriverWasm::new();
+    let decoded = driver
+        .decode_event(&event.topic, &event.data)
+        .expect("Failed to decode PauseToggled event");
+
+    // PauseToggled is a unit struct, may serialize to null or empty array
+    assert!(
+        decoded.is_null() || (decoded.is_array() && decoded.as_array().unwrap().is_empty()),
+        "PauseToggled should serialize to null or empty array, got: {decoded:?}"
+    );
+}
+
+#[test]
+fn test_decode_event_bridge_initiated() {
+    // 1. Call the contract to emit a real BridgeInitiated event
+    let mut session = setup_contract_session();
+
+    let deposit = Deposit {
+        to: EVMAddress([1u8; 20]),
+        amount: 1000,
+        fee: 10,
+        extra_data: vec![0xAB, 0xCD],
+    };
+
+    let receipt = session
+        .call_public::<_, ()>(&OWNER_SK, TEST_BRIDGE_ID, "deposit", &deposit)
+        .expect("deposit should succeed");
+
+    // 2. Find the BridgeInitiated event (deposit emits multiple events)
+    let event = receipt
+        .events
+        .iter()
+        .find(|e| e.topic == "bridge_initiated")
+        .expect("deposit should emit bridge_initiated event");
+
+    // 3. Decode the event using the data-driver
+    let mut driver = DataDriverWasm::new();
+    let decoded = driver
+        .decode_event(&event.topic, &event.data)
+        .expect("Failed to decode BridgeInitiated event");
+
+    // Verify the decoded fields match what we sent
+    assert!(decoded.is_object(), "BridgeInitiated should be an object");
+    assert_eq!(decoded["amount"], 1000);
+    assert_eq!(decoded["deposit_fee"], 10);
+
+    // extra_data should be present as an array
+    assert!(
+        decoded["extra_data"].is_array(),
+        "extra_data should be an array"
+    );
 }
