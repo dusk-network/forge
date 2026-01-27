@@ -1062,3 +1062,248 @@ fn test_schema_multiple_impl_blocks() {
     assert!(fn_names.contains(&"paused"), "missing paused from Pausable trait impl");
     assert!(fn_names.contains(&"toggle_pause"), "missing toggle_pause from Pausable trait impl");
 }
+
+// =============================================================================
+// Schema JSON compliance tests
+// =============================================================================
+
+#[test]
+fn test_schema_is_valid_json() {
+    let schema_json = get_schema_from_wasm();
+
+    // Verify it's valid UTF-8 (already checked in get_schema_from_wasm)
+    assert!(!schema_json.is_empty(), "Schema should not be empty");
+
+    // Verify it parses as valid JSON
+    let result: Result<serde_json::Value, _> = serde_json::from_str(&schema_json);
+    assert!(result.is_ok(), "Schema should be valid JSON: {:?}", result.err());
+
+    // Verify it's a JSON object (not array, string, etc.)
+    let schema = result.unwrap();
+    assert!(schema.is_object(), "Schema root should be a JSON object");
+}
+
+#[test]
+fn test_schema_has_required_top_level_fields() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let obj = schema.as_object().expect("Schema should be an object");
+
+    // Required top-level fields
+    assert!(obj.contains_key("name"), "Schema must have 'name' field");
+    assert!(obj.contains_key("functions"), "Schema must have 'functions' field");
+    assert!(obj.contains_key("events"), "Schema must have 'events' field");
+    assert!(obj.contains_key("imports"), "Schema must have 'imports' field");
+
+    // Verify types of top-level fields
+    assert!(schema["name"].is_string(), "'name' must be a string");
+    assert!(schema["functions"].is_array(), "'functions' must be an array");
+    assert!(schema["events"].is_array(), "'events' must be an array");
+    assert!(schema["imports"].is_array(), "'imports' must be an array");
+}
+
+#[test]
+fn test_schema_function_fields_consistent() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let functions = schema["functions"].as_array().expect("functions should be an array");
+
+    for (i, func) in functions.iter().enumerate() {
+        let func_obj = func.as_object()
+            .unwrap_or_else(|| panic!("Function at index {i} should be an object"));
+
+        // Required fields for every function
+        assert!(
+            func_obj.contains_key("name"),
+            "Function at index {i} missing 'name' field"
+        );
+        assert!(
+            func_obj.contains_key("input"),
+            "Function at index {i} missing 'input' field"
+        );
+        assert!(
+            func_obj.contains_key("output"),
+            "Function at index {i} missing 'output' field"
+        );
+        assert!(
+            func_obj.contains_key("custom"),
+            "Function at index {i} missing 'custom' field"
+        );
+
+        // Verify field types
+        let name = &func["name"];
+        assert!(
+            name.is_string(),
+            "Function at index {i}: 'name' must be string, got {name:?}"
+        );
+
+        let input = &func["input"];
+        assert!(
+            input.is_string(),
+            "Function at index {i}: 'input' must be string, got {input:?}"
+        );
+
+        let output = &func["output"];
+        assert!(
+            output.is_string(),
+            "Function at index {i}: 'output' must be string, got {output:?}"
+        );
+
+        let custom = &func["custom"];
+        assert!(
+            custom.is_boolean(),
+            "Function at index {i}: 'custom' must be boolean, got {custom:?}"
+        );
+
+        // 'doc' is optional but if present must be string or null
+        if let Some(doc) = func_obj.get("doc") {
+            assert!(
+                doc.is_string() || doc.is_null(),
+                "Function at index {i}: 'doc' must be string or null, got {doc:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_schema_event_fields_consistent() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let events = schema["events"].as_array().expect("events should be an array");
+
+    for (i, event) in events.iter().enumerate() {
+        let event_obj = event.as_object()
+            .unwrap_or_else(|| panic!("Event at index {i} should be an object"));
+
+        // Required fields for every event
+        assert!(
+            event_obj.contains_key("topic"),
+            "Event at index {i} missing 'topic' field"
+        );
+        assert!(
+            event_obj.contains_key("data"),
+            "Event at index {i} missing 'data' field"
+        );
+
+        // Verify field types
+        let topic = &event["topic"];
+        assert!(
+            topic.is_string(),
+            "Event at index {i}: 'topic' must be string, got {topic:?}"
+        );
+
+        let data = &event["data"];
+        assert!(
+            data.is_string(),
+            "Event at index {i}: 'data' must be string, got {data:?}"
+        );
+
+        // Topic should not be empty
+        let topic_str = topic.as_str().unwrap();
+        assert!(
+            !topic_str.is_empty(),
+            "Event at index {i}: 'topic' should not be empty"
+        );
+    }
+}
+
+#[test]
+fn test_schema_import_fields_consistent() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let imports = schema["imports"].as_array().expect("imports should be an array");
+
+    for (i, import) in imports.iter().enumerate() {
+        let import_obj = import.as_object()
+            .unwrap_or_else(|| panic!("Import at index {i} should be an object"));
+
+        // Required fields for every import
+        assert!(
+            import_obj.contains_key("name"),
+            "Import at index {i} missing 'name' field"
+        );
+        assert!(
+            import_obj.contains_key("path"),
+            "Import at index {i} missing 'path' field"
+        );
+
+        // Verify field types
+        let name = &import["name"];
+        assert!(
+            name.is_string(),
+            "Import at index {i}: 'name' must be string, got {name:?}"
+        );
+
+        let path = &import["path"];
+        assert!(
+            path.is_string(),
+            "Import at index {i}: 'path' must be string, got {path:?}"
+        );
+
+        // Name should not be empty
+        let name_str = name.as_str().unwrap();
+        assert!(
+            !name_str.is_empty(),
+            "Import at index {i}: 'name' should not be empty"
+        );
+
+        // Path should not be empty
+        let path_str = path.as_str().unwrap();
+        assert!(
+            !path_str.is_empty(),
+            "Import at index {i}: 'path' should not be empty"
+        );
+    }
+}
+
+#[test]
+fn test_schema_no_duplicate_function_names() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let fn_names: Vec<&str> = functions
+        .iter()
+        .map(|f| f["name"].as_str().unwrap())
+        .collect();
+
+    // Check for duplicates
+    let mut seen = std::collections::HashSet::new();
+    for name in &fn_names {
+        assert!(
+            seen.insert(*name),
+            "Duplicate function name in schema: {name}"
+        );
+    }
+}
+
+#[test]
+fn test_schema_no_duplicate_event_topics() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let events = schema["events"].as_array().expect("events should be an array");
+    let topics: Vec<&str> = events
+        .iter()
+        .map(|e| e["topic"].as_str().unwrap())
+        .collect();
+
+    // Check for duplicates
+    let mut seen = std::collections::HashSet::new();
+    for topic in &topics {
+        assert!(
+            seen.insert(*topic),
+            "Duplicate event topic in schema: {topic}"
+        );
+    }
+}
