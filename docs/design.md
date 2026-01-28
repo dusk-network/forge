@@ -416,7 +416,6 @@ Contracts using the macro need feature flags in `Cargo.toml`:
 
 ```toml
 [features]
-default = ["contract"]
 contract = ["dusk-core/abi-dlmalloc", "evm-core/abi"]
 data-driver = ["dep:dusk-data-driver", "dusk-data-driver/wasm-export", "evm-core/serde"]
 
@@ -425,9 +424,9 @@ dusk-core = { workspace = true }
 dusk-data-driver = { workspace = true, optional = true }
 ```
 
-Build commands:
-- `cargo build --target wasm32-unknown-unknown` → Contract WASM
-- `cargo build --target wasm32-unknown-unknown --no-default-features --features data-driver` → Data-driver WASM
+No default feature is defined. Build commands explicitly select the feature:
+- `cargo build --target wasm32-unknown-unknown --features contract` → Contract WASM
+- `cargo build --target wasm32-unknown-unknown --features data-driver` → Data-driver WASM
 
 ## Edge Cases
 

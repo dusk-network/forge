@@ -8,6 +8,10 @@
 #![no_std]
 #![cfg(target_family = "wasm")]
 
+// Require explicit feature selection for WASM builds
+#[cfg(not(any(feature = "contract", feature = "data-driver")))]
+compile_error!("Enable either 'contract' or 'data-driver' feature for WASM builds");
+
 extern crate alloc;
 
 /// Counter contract with basic increment/decrement functionality.

@@ -31,9 +31,9 @@ constant_time_eq = { workspace = true }
 time-core = { workspace = true }
 
 [features]
-# Default: contract WASM build
-default = ["dusk-core/abi-dlmalloc", "evm-core/abi"]
-# Data-driver WASM (use with --no-default-features)
+# Contract WASM build
+contract = ["dusk-core/abi-dlmalloc", "evm-core/abi"]
+# Data-driver WASM build
 data-driver = [
   "dep:dusk-data-driver",
   "dusk-data-driver/wasm-export",

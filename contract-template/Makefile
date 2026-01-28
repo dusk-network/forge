@@ -24,6 +24,9 @@
 # Configuration (override these as needed)
 # -----------------------------------------------------------------------------
 
+# Contract feature name (adjust to match your Cargo.toml)
+CONTRACT_FEATURE ?= contract
+
 # Data-driver feature name (adjust to match your Cargo.toml)
 DD_FEATURE ?= data-driver-js
 
@@ -101,6 +104,7 @@ wasm: ## Build contract WASM (optimizes if wasm-opt available)
 		RUSTFLAGS="$(RUSTFLAGS) --remap-path-prefix $(HOME)= -C link-args=-zstack-size=$(STACK_SIZE)" \
 		cargo build -Z build-std=core,alloc \
 			--release \
+			--features $(CONTRACT_FEATURE) \
 			--color=always \
 			--target $(WASM_TARGET)
 	$(call optimize-wasm,$(CONTRACT_WASM_FILE))
@@ -115,7 +119,6 @@ wasm-dd: ## Build data-driver WASM (optimizes if wasm-opt available)
 		RUSTFLAGS="$(RUSTFLAGS) --remap-path-prefix $(HOME)=" \
 		cargo build \
 			--release \
-			--no-default-features \
 			--features $(DD_FEATURE) \
 			--color=always \
 			--target $(WASM_TARGET)
@@ -137,7 +140,7 @@ $(DD_WASM_FILE): wasm-dd
 # -----------------------------------------------------------------------------
 
 .PHONY: test
-test: $(CONTRACT_WASM_FILE) $(DD_WASM_FILE) ## Build WASMs and run tests
+test: $(CONTRACT_WASM_FILE) ## Build contract WASM and run tests
 	@cargo test --release
 
 # -----------------------------------------------------------------------------
@@ -148,6 +151,7 @@ test: $(CONTRACT_WASM_FILE) $(DD_WASM_FILE) ## Build WASMs and run tests
 clippy: ## Run clippy with strict warnings
 	@cargo clippy -Z build-std=core,alloc \
 		--release \
+		--features $(CONTRACT_FEATURE) \
 		--target $(WASM_TARGET) \
 		-- -D warnings
 
@@ -155,13 +159,13 @@ clippy: ## Run clippy with strict warnings
 expand: ## Show macro-expanded contract code
 	$(call require-tool,cargo-expand,cargo install cargo-expand)
 	@echo "Expanding macros for: $(CRATE_NAME)"
-	@cargo expand --release --target $(WASM_TARGET)
+	@cargo expand --release --features $(CONTRACT_FEATURE) --target $(WASM_TARGET)
 
 .PHONY: expand-dd
 expand-dd: ## Show macro-expanded data-driver code
 	$(call require-tool,cargo-expand,cargo install cargo-expand)
 	@echo "Expanding data-driver macros for: $(CRATE_NAME)"
-	@cargo expand --release --no-default-features --features $(DD_FEATURE) --target $(WASM_TARGET)
+	@cargo expand --release --features $(DD_FEATURE) --target $(WASM_TARGET)
 
 .PHONY: doc
 doc: ## Build documentation
@@ -194,6 +198,7 @@ help: ## Show this help message
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Configuration (override with make VAR=value):"
-	@echo "  DD_FEATURE      Data-driver feature name (current: $(DD_FEATURE))"
-	@echo "  WASM_OPT_LEVEL  Optimization level (current: $(WASM_OPT_LEVEL))"
-	@echo "  STACK_SIZE      Contract stack size (current: $(STACK_SIZE))"
+	@echo "  CONTRACT_FEATURE  Contract feature name (current: $(CONTRACT_FEATURE))"
+	@echo "  DD_FEATURE        Data-driver feature name (current: $(DD_FEATURE))"
+	@echo "  WASM_OPT_LEVEL    Optimization level (current: $(WASM_OPT_LEVEL))"
+	@echo "  STACK_SIZE        Contract stack size (current: $(STACK_SIZE))"

@@ -4,45 +4,35 @@
 # Copy this entire directory to create a new contract.
 # Replace placeholders (YOUR_CONTRACT_NAME, etc.) with your actual values.
 #
-# DEPENDENCY SETUP:
-# -----------------
+# BUILD TARGETS:
+# --------------
 # This contract has TWO build targets that share the same source file:
 #
-# 1. CONTRACT WASM (default) - Runs on-chain in the Dusk VM
-#    - Built with: `make wasm`
-#    - Uses `dusk-core/abi-dlmalloc` to have access to the abi host functions and
-#      for the WASM allocator
-#    - The entire crate is gated by `#![cfg(target_family = "wasm")]`
+# 1. CONTRACT WASM - Runs on-chain in the Dusk VM
+#    - Built with: `make wasm` (uses `--features contract`)
+#    - Uses `dusk-core/abi-dlmalloc` for the WASM allocator
 #
 # 2. DATA-DRIVER WASM - Runs off-chain (browsers, wallets, explorers)
-#    - Built with: `make wasm-dd`
+#    - Built with: `make wasm-dd` (uses `--features data-driver-js`)
 #    - Provides JSON encoding/decoding for contract interactions
-#    - Requires `dusk-core/serde` for JSON serialization of dusk-core types
 #
-# WHY WASM-ONLY DEPENDENCIES?
-# ---------------------------
+# The `contract` and `data-driver` features are MUTUALLY EXCLUSIVE.
+# The Makefile selects one feature per build. With no default feature,
+# `cargo test` runs on native without pulling in WASM-only dependencies.
+#
+# DEPENDENCIES:
+# -------------
 # All runtime deps are in `[target.'cfg(target_family = "wasm")'.dependencies]`
-# because the contract is gated by `#![cfg(target_family = "wasm")]`. This means:
-# - Dependencies are only compiled for WASM targets
-# - Native builds (like `cargo test`) don't pull in WASM-only deps
+# because the contract is gated by `#![cfg(target_family = "wasm")]`.
 #
-# DEV-DEPENDENCIES:
-# -----------------
-# `[dev-dependencies]` are for tests that run on the HOST (not in WASM).
-# Tests typically:
-# - Compile the contract WASM
-# - Deploy it to dusk-vm
-# - Call contract functions and verify results
-# So dev-deps need the same types (dusk-core) but without WASM-specific features.
+# Dev-deps are for tests that run on the HOST (not in WASM).
 #
 # ADDING NEW DEPENDENCIES:
 # ------------------------
-# - Contract and data-driver deps: Add to wasm-only section
-# - Contract-only deps: Add to wasm-only section with `optional = true`
-# - Data-driver-only deps: Add to wasm-only section with `optional = true`,
-#   then add `dep:your-dep` to the `data-driver` feature
-# - If a dep has types used in function signatures that need JSON serialization,
-#   enable its `serde` feature in the `data-driver` feature list
+# - Both builds: Add to wasm-only section
+# - Contract-only: Add with `optional = true`, then add to `contract` feature
+# - Data-driver-only: Add with `optional = true`, then add to `data-driver` feature
+# - Types needing JSON: Enable their `serde` feature in `data-driver`
 # =============================================================================
 
 [package]
@@ -70,12 +60,9 @@ dusk-vm = "0.1"
 # -----------------------------------------------------------------------------
 [features]
 # Contract WASM build (on-chain execution)
-# - abi-dlmalloc: Custom allocator for WASM environment
-default = ["dusk-core/abi-dlmalloc"]
+contract = ["dusk-core/abi-dlmalloc"]
 
 # Data-driver WASM build (off-chain JSON encoding/decoding)
-# - dusk-core/serde: Enables Serialize/Deserialize for dusk-core types
-# - If you add deps with types in function signatures, add their /serde features here
 data-driver = [
   "dusk-core/serde",
   "dep:dusk-data-driver",

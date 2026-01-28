@@ -236,7 +236,7 @@ The schema includes:
 
 Contracts have **two build targets** from the same source:
 
-1. **Contract WASM** (default) - Runs on-chain in the Dusk VM
+1. **Contract WASM** - Runs on-chain in the Dusk VM
 2. **Data-driver WASM** - Runs off-chain for JSON encoding/decoding
 
 ### Dependencies
@@ -259,11 +259,11 @@ dusk-vm = "0.1"     # To run contract in tests
 ```toml
 [features]
 # Contract WASM - uses custom allocator for on-chain execution
-default = ["dusk-core/abi-dlmalloc"]
+contract = ["dusk-core/abi-dlmalloc"]
 
 # Data-driver WASM - enable serde for JSON serialization
 data-driver = [
-  "dusk-core/serde",           # Required for dusk-core types in function signatures
+  "dusk-core/serde",
   "dep:dusk-data-driver",
   "dusk-data-driver/wasm-export",
 ]
@@ -272,12 +272,14 @@ data-driver = [
 data-driver-js = ["data-driver", "dusk-data-driver/alloc"]
 ```
 
+The `contract` and `data-driver` features are **mutually exclusive** - never enable both at the same time. The Makefile handles this by explicitly selecting one feature per build target.
+
 ### Adding Dependencies
 
 | Dependency Type | Where to Add | Feature Flags |
 |----------------|--------------|---------------|
 | Both builds | WASM-only section | None needed |
-| Contract-only | WASM-only section with `optional = true` | Add `dep:name` to `default` feature |
+| Contract-only | WASM-only section with `optional = true` | Add `dep:name` to `contract` feature |
 | Data-driver-only | WASM-only section with `optional = true` | Add `dep:name` to `data-driver` feature |
 
 If a dependency has types used in function signatures, also add `name/serde` to the `data-driver` feature to enable JSON serialization.
@@ -314,8 +316,9 @@ The contract template includes a Makefile with the following targets:
 Override Makefile variables as needed:
 
 ```bash
-make wasm WASM_OPT_LEVEL=-Os     # Use -Os instead of -Oz
-make wasm STACK_SIZE=131072      # 128KB stack instead of 64KB
+make wasm CONTRACT_FEATURE=contract  # Custom contract feature name
+make wasm WASM_OPT_LEVEL=-Os         # Use -Os instead of -Oz
+make wasm STACK_SIZE=131072          # 128KB stack instead of 64KB
 make wasm-dd DD_FEATURE=data-driver  # Use data-driver instead of data-driver-js
 ```
 
