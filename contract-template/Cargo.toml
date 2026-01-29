@@ -46,7 +46,7 @@ edition = "2021"
 [target.'cfg(target_family = "wasm")'.dependencies]
 dusk-core = "1.4"
 dusk-data-driver = { version = "0.3", optional = true }
-dusk-wasm = "0.1"
+dusk-forge = "0.1"
 
 # -----------------------------------------------------------------------------
 # Dev Dependencies (for tests running on the host, not in WASM)

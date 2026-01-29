@@ -34,7 +34,7 @@ Full type information enables:
 The standard Rust approach is a derive macro that types opt into:
 
 ```rust
-use dusk_wasm::SchemaType;
+use dusk_forge::SchemaType;
 
 #[derive(SchemaType)]
 pub enum SetU64 {
@@ -104,7 +104,7 @@ pub struct FieldSchema {
 
 ### New Crate or Module
 
-A `dusk-wasm-schema` crate (or module) containing:
+A `dusk-forge-schema` crate (or module) containing:
 
 - `SchemaType` trait definition
 - `TypeSchema` enum and related types

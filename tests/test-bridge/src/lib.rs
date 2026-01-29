@@ -26,7 +26,7 @@ compile_error!("Enable either 'contract' or 'data-driver' feature for WASM build
 extern crate alloc;
 
 /// Test bridge contract demonstrating macro features.
-#[dusk_wasm::contract]
+#[dusk_forge::contract]
 mod test_bridge {
     use alloc::collections::BTreeMap;
 

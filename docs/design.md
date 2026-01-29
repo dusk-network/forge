@@ -86,7 +86,7 @@ The macro expects a module containing:
 - Public methods that become contract functions
 
 ```rust
-use dusk_wasm::contract;
+use dusk_forge::contract;
 
 #[contract]
 mod my_contract {
@@ -266,7 +266,7 @@ If a handler is not provided for a role, the data-driver will return an "Unsuppo
 A `CONTRACT_SCHEMA` constant is generated at the crate root, containing metadata about all functions and events:
 
 ```rust
-pub const CONTRACT_SCHEMA: dusk_wasm::schema::Contract = dusk_wasm::schema::Contract {
+pub const CONTRACT_SCHEMA: dusk_forge::schema::Contract = dusk_forge::schema::Contract {
     name: "MyContract",
     imports: &[
         Import { name: "Deposit", path: "evm_core::standard_bridge::Deposit" },

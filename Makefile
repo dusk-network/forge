@@ -1,4 +1,4 @@
-# Workspace Makefile for dusk-wasm
+# Workspace Makefile for dusk-forge
 
 .PHONY: all test test-unit test-integration clippy clean help
 

@@ -6,7 +6,7 @@ edition.workspace = true
 [target.'cfg(target_family = "wasm")'.dependencies]
 dusk-core = "1.4"
 dusk-data-driver = { version = "0.3", optional = true }
-dusk-wasm = { path = "../.." }
+dusk-forge = { path = "../.." }
 evm-core = { path = "../../../DuskEVM/L1Contracts/core" }
 serde_json = { version = "1", default-features = false, features = [
   "alloc",

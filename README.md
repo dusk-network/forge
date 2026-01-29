@@ -43,7 +43,7 @@ Edit `src/lib.rs`:
 
 extern crate alloc;
 
-#[dusk_wasm::contract]
+#[dusk_forge::contract]
 mod my_contract {
     use dusk_core::abi;
 
@@ -92,7 +92,7 @@ The `#[contract]` macro expects:
 
 | Element | Requirement |
 |---------|-------------|
-| Module | Annotated with `#[dusk_wasm::contract]` |
+| Module | Annotated with `#[dusk_forge::contract]` |
 | Struct | Single public struct (the contract state) |
 | Constructor | `pub const fn new() -> Self` |
 | Methods | `pub fn` methods become contract functions |
@@ -260,7 +260,7 @@ All runtime dependencies go in the WASM-only section because contracts are gated
 [target.'cfg(target_family = "wasm")'.dependencies]
 dusk-core = "1.4"
 dusk-data-driver = { version = "0.3", optional = true }  # Only for data-driver
-dusk-wasm = "0.1"
+dusk-forge = "0.1"
 
 [dev-dependencies]
 dusk-core = "1.4"   # Same types, but for host-side tests
@@ -345,7 +345,7 @@ make wasm-dd DD_FEATURE=data-driver  # Use data-driver instead of data-driver-js
 ## Project Structure
 
 ```
-dusk-wasm/
+dusk-forge/
 ├── src/lib.rs          # Re-exports the contract macro
 ├── contract-macro/     # Proc-macro implementation
 ├── contract-template/  # Template for new contracts

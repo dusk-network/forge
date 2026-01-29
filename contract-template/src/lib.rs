@@ -15,7 +15,7 @@ compile_error!("Enable either 'contract' or 'data-driver' feature for WASM build
 extern crate alloc;
 
 /// Counter contract with basic increment/decrement functionality.
-#[dusk_wasm::contract]
+#[dusk_forge::contract]
 mod counter {
     use dusk_core::abi;
 

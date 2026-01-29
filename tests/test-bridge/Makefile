@@ -1,7 +1,7 @@
 # =============================================================================
 # Test Bridge Contract Makefile
 # =============================================================================
-# This contract is used for testing the dusk-wasm macro.
+# This contract is used for testing the dusk-forge macro.
 #
 # Prerequisites:
 #   - Rust nightly toolchain with wasm32-unknown-unknown target

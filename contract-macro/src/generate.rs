@@ -28,7 +28,7 @@ pub(crate) fn schema(
             let path = &i.path;
 
             quote! {
-                dusk_wasm::schema::Import {
+                dusk_forge::schema::Import {
                     name: #name,
                     path: #path,
                 }
@@ -50,7 +50,7 @@ pub(crate) fn schema(
             let output_str = output.to_string();
 
             quote! {
-                dusk_wasm::schema::Function {
+                dusk_forge::schema::Function {
                     name: #name_str,
                     doc: #doc,
                     input: #input_str,
@@ -71,7 +71,7 @@ pub(crate) fn schema(
             let data_str = data.to_string();
 
             quote! {
-                dusk_wasm::schema::Event {
+                dusk_forge::schema::Event {
                     topic: #topic,
                     data: #data_str,
                 }
@@ -81,7 +81,7 @@ pub(crate) fn schema(
 
     quote! {
         /// Contract schema containing metadata about functions, events, and imports.
-        pub const CONTRACT_SCHEMA: dusk_wasm::schema::Contract = dusk_wasm::schema::Contract {
+        pub const CONTRACT_SCHEMA: dusk_forge::schema::Contract = dusk_forge::schema::Contract {
             name: #contract_name_lit,
             imports: &[#(#import_entries),*],
             functions: &[#(#function_entries),*],

@@ -1239,6 +1239,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dusk-forge"
+version = "0.1.0"
+dependencies = [
+ "contract-macro",
+ "dusk-core",
+ "evm-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "dusk-jubjub"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1331,17 +1342,6 @@ dependencies = [
  "rkyv",
  "sha3",
  "wasmparser 0.240.0",
-]
-
-[[package]]
-name = "dusk-wasm"
-version = "0.1.0"
-dependencies = [
- "contract-macro",
- "dusk-core",
- "evm-core",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -3060,8 +3060,8 @@ dependencies = [
  "constant_time_eq",
  "dusk-core",
  "dusk-data-driver",
+ "dusk-forge",
  "dusk-vm",
- "dusk-wasm",
  "evm-core",
  "rand 0.8.5",
  "rkyv",
