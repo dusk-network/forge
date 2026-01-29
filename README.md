@@ -2,7 +2,7 @@
 Dusk Forge
 </h1>
 
-<img src="https://github.com/dusk-network/forge/blob/main/assets/dusk-forge-illustration.png"  alt="Dusk Forge Illustration"></img>
+<img src="assets/dusk-forge-illustration.png"  alt="Dusk Forge Illustration"></img>
 <p align="center">
 
 <a href="https://github.com/HDauven/dusk-forge" target="_blank">
