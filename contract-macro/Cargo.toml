@@ -2,6 +2,8 @@
 name = "dusk-forge-contract"
 version = "0.1.0"
 edition = "2021"
+description = "A smart contract development macro for Dusk"
+license = "MPL-2.0"
 
 [lib]
 proc-macro = true
