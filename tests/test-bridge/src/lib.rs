@@ -113,13 +113,13 @@ mod test_bridge {
         /// Sets a u64 configuration value.
         pub fn set_u64(&mut self, value: SetU64) {
             if let SetU64::FinalizationPeriod(new_value) = value {
-                let previous = core::mem::replace(
-                    &mut self.finalization_period,
-                    new_value,
-                );
+                let previous = core::mem::replace(&mut self.finalization_period, new_value);
                 abi::emit(
                     events::U64Set::FINALIZATION_PERIOD,
-                    events::U64Set { previous, new: new_value },
+                    events::U64Set {
+                        previous,
+                        new: new_value,
+                    },
                 );
             }
         }
@@ -127,11 +127,13 @@ mod test_bridge {
         /// Sets an EVM address configuration value.
         pub fn set_evm_address_or_offset(&mut self, value: SetEVMAddressOrOffset) {
             if let SetEVMAddressOrOffset::OtherBridge(new_value) = value {
-                let previous =
-                    core::mem::replace(&mut self.other_bridge, new_value);
+                let previous = core::mem::replace(&mut self.other_bridge, new_value);
                 abi::emit(
                     events::EVMAddressOrOffsetSet::OTHER_BRIDGE,
-                    events::EVMAddressOrOffsetSet { previous, new: new_value },
+                    events::EVMAddressOrOffsetSet {
+                        previous,
+                        new: new_value,
+                    },
                 );
             }
         }
@@ -204,6 +206,7 @@ mod test_bridge {
         /// Tests that the macro correctly handles reference parameters by receiving
         /// owned values and passing references. The macro should generate code that
         /// receives `PendingWithdrawal` and passes `&withdrawal` to this method.
+        #[allow(clippy::unused_self)]
         pub fn verify_withdrawal(&self, withdrawal: &PendingWithdrawal) -> bool {
             withdrawal.amount > 0 && withdrawal.block_height > 0
         }
@@ -369,12 +372,15 @@ mod test_bridge {
 
     /// Custom decoder for the `extra_data` data-driver function.
     #[contract(decode_output = "extra_data")]
-    fn decode_extra_data(rkyv: &[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error> {
+    fn decode_extra_data(
+        rkyv: &[u8],
+    ) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error> {
         // Decode the bytes as an EVMAddress and return as JSON
         if rkyv.len() != 20 {
-            return Err(dusk_data_driver::Error::Unsupported(
-                alloc::format!("expected 20 bytes, got {}", rkyv.len()),
-            ));
+            return Err(dusk_data_driver::Error::Unsupported(alloc::format!(
+                "expected 20 bytes, got {}",
+                rkyv.len()
+            )));
         }
         let mut addr = [0u8; 20];
         addr.copy_from_slice(rkyv);
