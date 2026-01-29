@@ -1,4 +1,17 @@
-# dusk-wasm
+<h1 align="center">
+Dusk Forge
+</h1>
+
+<img src="https://github.com/dusk-network/forge/blob/main/assets/dusk-forge-illustration.png"  alt="Dusk Forge Illustration"></img>
+<p align="center">
+
+<a href="https://github.com/HDauven/dusk-forge" target="_blank">
+  <img src="https://img.shields.io/badge/github-dusk%20forge-blueviolet?logo=github" alt="Repository">
+</a>
+<a href="https://docs.rs/dusk-forge/" target="_blank">
+  <img src="https://img.shields.io/badge/docs-dusk%20forge-blue?logo=rust" alt="Documentation">
+</a>
+</p>
 
 Contract macro and tooling for Dusk Network WASM smart contracts.
 
@@ -357,3 +370,8 @@ make help
 ## License
 
 This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+Please see the [LICENSE](./LICENSE) for further details.
+
+The included illustration is created by [Regisha Dauven](https://regishadauven.com/) and is used with exclusive
+permission. Redistribution, modification, or reuse of the illustration by third
+parties is prohibited without explicit permission from the creator.
