@@ -18,4 +18,4 @@
 pub mod schema;
 
 /// Re-export the contract proc macro.
-pub use contract_macro::contract;
+pub use dusk_forge_contract::contract;

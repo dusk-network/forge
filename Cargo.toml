@@ -9,7 +9,7 @@ keywords = ["dusk", "smart-contract", "blockchain", "proc-macro", "wasm"]
 categories = ["development-tools"]
 
 [dependencies]
-contract-macro = { path = "contract-macro" }
+dusk-forge-contract = { workspace = true }
 serde = { version = "1", default-features = false, features = [
   "derive",
   "alloc",
@@ -29,6 +29,10 @@ exclude = ["contract-template"]
 edition = "2021"
 
 [workspace.dependencies]
+# Workspace internal dependencies
+dusk-forge-contract = { version = "0.1.0", path = "./contract-macro/" }
+# dusk-forge-contract = { version = "0.2.0-alpha.1", path = "./contract-macro/" }
+
 # Pin to match L1Contracts versions
 dusk-vm = { version = "=1.4.0", default-features = false }
 # Pin to avoid edition2024 issues

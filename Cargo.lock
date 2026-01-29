@@ -652,15 +652,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
-name = "contract-macro"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.114",
-]
-
-[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1242,11 +1233,20 @@ dependencies = [
 name = "dusk-forge"
 version = "0.1.0"
 dependencies = [
- "contract-macro",
  "dusk-core",
+ "dusk-forge-contract",
  "evm-core",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "dusk-forge-contract"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
 ]
 
 [[package]]
