@@ -890,9 +890,15 @@ mod tests {
             panic!("expected error for missing feeds attribute");
         };
         let msg = err.to_string();
-        assert!(msg.contains("missing"), "error should mention 'missing': {msg}");
+        assert!(
+            msg.contains("missing"),
+            "error should mention 'missing': {msg}"
+        );
         assert!(msg.contains("feeds"), "error should mention 'feeds': {msg}");
-        assert!(msg.contains("42u64"), "error should show fed expression: {msg}");
+        assert!(
+            msg.contains("42u64"),
+            "error should show fed expression: {msg}"
+        );
     }
 
     #[test]
@@ -911,8 +917,14 @@ mod tests {
             panic!("expected error for multiple feed calls");
         };
         let msg = err.to_string();
-        assert!(msg.contains("multiple"), "error should mention 'multiple': {msg}");
-        assert!(msg.contains("abi::feed()"), "error should mention 'abi::feed()': {msg}");
+        assert!(
+            msg.contains("multiple"),
+            "error should mention 'multiple': {msg}"
+        );
+        assert!(
+            msg.contains("abi::feed()"),
+            "error should mention 'abi::feed()': {msg}"
+        );
     }
 
     #[test]
@@ -931,7 +943,10 @@ mod tests {
         };
         let msg = err.to_string();
         assert!(msg.contains("tuple"), "error should mention 'tuple': {msg}");
-        assert!(msg.contains("42u64"), "error should show fed expression: {msg}");
+        assert!(
+            msg.contains("42u64"),
+            "error should show fed expression: {msg}"
+        );
     }
 
     #[test]
@@ -958,7 +973,10 @@ mod tests {
         let name = format_ident!("regular_method");
         let result = validate_feeds(&method, &name, &None);
 
-        assert!(result.is_ok(), "method without abi::feed() should not require attribute");
+        assert!(
+            result.is_ok(),
+            "method without abi::feed() should not require attribute"
+        );
     }
 
     #[test]
@@ -998,7 +1016,10 @@ mod tests {
             panic!("expected error for multiple feed calls in loop");
         };
         let msg = err.to_string();
-        assert!(msg.contains("multiple"), "error should mention 'multiple': {msg}");
+        assert!(
+            msg.contains("multiple"),
+            "error should mention 'multiple': {msg}"
+        );
     }
 
     #[test]
@@ -1015,7 +1036,10 @@ mod tests {
         let feed_type: TokenStream2 = quote! { u64 };
         let result = validate_feeds(&method, &name, &Some(feed_type));
 
-        assert!(result.is_ok(), "single feed call in if block should be valid");
+        assert!(
+            result.is_ok(),
+            "single feed call in if block should be valid"
+        );
     }
 
     #[test]
@@ -1038,7 +1062,10 @@ mod tests {
             panic!("expected error for feed calls in multiple branches");
         };
         let msg = err.to_string();
-        assert!(msg.contains("multiple"), "error should mention 'multiple': {msg}");
+        assert!(
+            msg.contains("multiple"),
+            "error should mention 'multiple': {msg}"
+        );
     }
 
     #[test]
@@ -1304,14 +1331,12 @@ mod tests {
 
     #[test]
     fn test_trait_impls_finds_with_expose() {
-        let items: Vec<Item> = vec![
-            syn::parse_quote! {
-                #[contract(expose = [owner])]
-                impl OwnableTrait for MyContract {
-                    fn owner(&self) -> Address { self.owner }
-                }
-            },
-        ];
+        let items: Vec<Item> = vec![syn::parse_quote! {
+            #[contract(expose = [owner])]
+            impl OwnableTrait for MyContract {
+                fn owner(&self) -> Address { self.owner }
+            }
+        }];
 
         let trait_impls = trait_impls(&items, "MyContract");
         assert_eq!(trait_impls.len(), 1);
@@ -1321,16 +1346,18 @@ mod tests {
 
     #[test]
     fn test_trait_impls_ignores_without_expose() {
-        let items: Vec<Item> = vec![
-            syn::parse_quote! {
-                impl OwnableTrait for MyContract {
-                    fn owner(&self) -> Address { self.owner }
-                }
-            },
-        ];
+        let items: Vec<Item> = vec![syn::parse_quote! {
+            impl OwnableTrait for MyContract {
+                fn owner(&self) -> Address { self.owner }
+            }
+        }];
 
         let trait_impls = trait_impls(&items, "MyContract");
-        assert_eq!(trait_impls.len(), 0, "should not find trait impl without expose attribute");
+        assert_eq!(
+            trait_impls.len(),
+            0,
+            "should not find trait impl without expose attribute"
+        );
     }
 
     #[test]

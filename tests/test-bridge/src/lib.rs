@@ -32,11 +32,11 @@ mod test_bridge {
 
     use dusk_core::abi;
     use types::events;
+    use types::{Address as DSAddress, OwnableUpgradeable};
     use types::{
         Deposit, EVMAddress, PendingWithdrawal, SetEVMAddressOrOffset, SetU64, WithdrawalId,
         WithdrawalRequest,
     };
-    use types::{Address as DSAddress, OwnableUpgradeable};
 
     // =========================================================================
     // Test trait for multiple trait implementation testing

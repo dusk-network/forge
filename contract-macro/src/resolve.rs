@@ -20,7 +20,10 @@ pub(crate) type TypeMap = HashMap<String, String>;
 
 /// Build an import lookup map from short name/alias to full path.
 fn build_import_map(imports: &[ImportInfo]) -> HashMap<String, String> {
-    imports.iter().map(|i| (i.name.clone(), i.path.clone())).collect()
+    imports
+        .iter()
+        .map(|i| (i.name.clone(), i.path.clone()))
+        .collect()
 }
 
 /// Resolve a type path to its fully qualified form.
@@ -56,8 +59,11 @@ fn resolve_syn_type(ty: &syn::Type, import_map: &HashMap<String, String>) -> Str
     match ty {
         syn::Type::Path(type_path) => resolve_type_path(type_path, import_map),
         syn::Type::Tuple(tuple) => {
-            let resolved: Vec<_> =
-                tuple.elems.iter().map(|elem| resolve_syn_type(elem, import_map)).collect();
+            let resolved: Vec<_> = tuple
+                .elems
+                .iter()
+                .map(|elem| resolve_syn_type(elem, import_map))
+                .collect();
             format!("({})", resolved.join(", "))
         }
         syn::Type::Reference(reference) => {
@@ -87,8 +93,10 @@ fn resolve_type_path(type_path: &syn::TypePath, import_map: &HashMap<String, Str
     // Check if the first segment can be resolved via imports
     if let Some(resolved_base) = import_map.get(&first_name) {
         // Build the rest of the path
-        let rest: Vec<String> =
-            segments[1..].iter().map(|seg| format_segment(seg, import_map)).collect();
+        let rest: Vec<String> = segments[1..]
+            .iter()
+            .map(|seg| format_segment(seg, import_map))
+            .collect();
 
         if rest.is_empty() {
             // Single segment type, may have generics
@@ -100,8 +108,10 @@ fn resolve_type_path(type_path: &syn::TypePath, import_map: &HashMap<String, Str
         }
     } else {
         // Not in import map - format as-is but still resolve generics
-        let formatted: Vec<String> =
-            segments.iter().map(|seg| format_segment(seg, import_map)).collect();
+        let formatted: Vec<String> = segments
+            .iter()
+            .map(|seg| format_segment(seg, import_map))
+            .collect();
         formatted.join("::")
     }
 }
@@ -114,10 +124,7 @@ fn format_segment(seg: &syn::PathSegment, import_map: &HashMap<String, String>) 
 }
 
 /// Format generic arguments, resolving inner types.
-fn format_generic_args(
-    args: &syn::PathArguments,
-    import_map: &HashMap<String, String>,
-) -> String {
+fn format_generic_args(args: &syn::PathArguments, import_map: &HashMap<String, String>) -> String {
     match args {
         syn::PathArguments::None => String::new(),
         syn::PathArguments::AngleBracketed(angle) => {
@@ -132,8 +139,11 @@ fn format_generic_args(
             format!("<{}>", resolved.join(", "))
         }
         syn::PathArguments::Parenthesized(paren) => {
-            let inputs: Vec<String> =
-                paren.inputs.iter().map(|ty| resolve_syn_type(ty, import_map)).collect();
+            let inputs: Vec<String> = paren
+                .inputs
+                .iter()
+                .map(|ty| resolve_syn_type(ty, import_map))
+                .collect();
             let output = match &paren.output {
                 syn::ReturnType::Default => String::new(),
                 syn::ReturnType::Type(_, ty) => format!(" -> {}", resolve_syn_type(ty, import_map)),
@@ -213,7 +223,10 @@ mod tests {
     use quote::quote;
 
     fn make_import(name: &str, path: &str) -> ImportInfo {
-        ImportInfo { name: name.to_string(), path: path.to_string() }
+        ImportInfo {
+            name: name.to_string(),
+            path: path.to_string(),
+        }
     }
 
     #[test]
@@ -266,7 +279,10 @@ mod tests {
 
         let ty = quote! { (Deposit, DSAddress) };
         let resolved = resolve_type(&ty, &import_map);
-        assert_eq!(resolved, "(evm_core::standard_bridge::Deposit, evm_core::Address)");
+        assert_eq!(
+            resolved,
+            "(evm_core::standard_bridge::Deposit, evm_core::Address)"
+        );
     }
 
     #[test]

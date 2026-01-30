@@ -743,7 +743,10 @@ mod tests {
         };
         let err = trait_method(&method, "AsyncTrait", false).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("cannot be async"), "error should mention async: {msg}");
+        assert!(
+            msg.contains("cannot be async"),
+            "error should mention async: {msg}"
+        );
         assert!(
             msg.contains("AsyncTrait::fetch"),
             "error should include trait::method name: {msg}"
