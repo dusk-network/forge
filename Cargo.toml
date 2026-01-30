@@ -18,11 +18,10 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 dusk-core = "1.4"
-evm-core = { path = "../DuskEVM/L1Contracts/core" }
 
 [workspace]
 resolver = "2"
-members = ["contract-macro", "tests/test-bridge"]
+members = ["contract-macro", "tests/types", "tests/test-bridge"]
 exclude = ["contract-template"]
 
 [workspace.package]

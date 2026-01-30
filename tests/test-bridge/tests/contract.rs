@@ -20,15 +20,17 @@ use dusk_core::abi::ContractId;
 use dusk_core::dusk;
 use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as AccountSecretKey};
 use dusk_vm::CallReceipt;
-use evm_core::standard_bridge::{
+mod test_session;
+
+use test_session::TestSession;
+
+use types::{
     EVMAddress, PendingWithdrawal, SetEVMAddressOrOffset, WithdrawalId, WithdrawalRequest,
 };
-use evm_core::Address as DSAddress;
+use types::Address as DSAddress;
 
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-
-use tests_setup::TestSession;
 
 const DEPLOYER: [u8; 64] = [0u8; 64];
 
@@ -202,7 +204,7 @@ impl TestBridgeSession {
         receiver
             .into_iter()
             .map(|data| {
-                tests_setup::rkyv_deserialize::<(WithdrawalId, PendingWithdrawal)>(&data)
+                test_session::rkyv_deserialize::<(WithdrawalId, PendingWithdrawal)>(&data)
             })
             .collect()
     }
@@ -217,7 +219,7 @@ impl TestBridgeSession {
 
         receiver
             .into_iter()
-            .map(|data| tests_setup::rkyv_deserialize::<WithdrawalId>(&data))
+            .map(|data| test_session::rkyv_deserialize::<WithdrawalId>(&data))
             .collect()
     }
 }

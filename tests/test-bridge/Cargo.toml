@@ -7,7 +7,7 @@ edition.workspace = true
 dusk-core = "1.4"
 dusk-data-driver = { version = "0.3", optional = true }
 dusk-forge = { path = "../.." }
-evm-core = { path = "../../../DuskEVM/L1Contracts/core" }
+types = { path = "../types" }
 serde_json = { version = "1", default-features = false, features = [
   "alloc",
 ], optional = true }
@@ -15,13 +15,15 @@ serde_json = { version = "1", default-features = false, features = [
 [dev-dependencies]
 dusk-core = "1.4"
 dusk-vm = { workspace = true, default-features = false }
-evm-core = { path = "../../../DuskEVM/L1Contracts/core" }
-tests-setup = { path = "../../../DuskEVM/L1Contracts/tests" }
+types = { path = "../types" }
+ff = { version = "0.13", default-features = false }
 rand = "0.8"
 rkyv = { version = "0.7", default-features = false, features = [
   "alloc",
   "size_32",
+  "validation",
 ] }
+rusk-prover = "1.3"
 serde_json = "1"
 wasmtime = "25"
 # Pin to avoid edition2024 issues (resolved via workspace)
@@ -32,12 +34,13 @@ time-core = { workspace = true }
 
 [features]
 # Contract WASM build
-contract = ["dusk-core/abi-dlmalloc", "evm-core/abi"]
+contract = ["dusk-core/abi-dlmalloc", "types/abi"]
 # Data-driver WASM build
 data-driver = [
   "dep:dusk-data-driver",
   "dusk-data-driver/wasm-export",
-  "evm-core/serde",
+  "types/serde",
+  "dusk-core/serde",
   "dep:serde_json",
 ]
 # Data-driver with alloc exports for JavaScript environments
