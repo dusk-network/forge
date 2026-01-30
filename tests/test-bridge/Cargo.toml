@@ -4,27 +4,23 @@ version = "0.1.0"
 edition.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-dusk-core = "1.4"
+dusk-core = { workspace = true }
 dusk-data-driver = { version = "0.3", optional = true }
 dusk-forge = { path = "../.." }
 types = { path = "../types" }
-serde_json = { version = "1", default-features = false, features = [
+serde_json = { workspace = true, default-features = false, features = [
   "alloc",
 ], optional = true }
 
 [dev-dependencies]
-dusk-core = "1.4"
+dusk-core = { workspace = true }
 dusk-vm = { workspace = true, default-features = false }
 types = { path = "../types" }
 ff = { version = "0.13", default-features = false }
 rand = "0.8"
-rkyv = { version = "0.7", default-features = false, features = [
-  "alloc",
-  "size_32",
-  "validation",
-] }
+rkyv = { workspace = true, features = ["validation"] }
 rusk-prover = "1.3"
-serde_json = "1"
+serde_json = { workspace = true, default-features = true }
 wasmtime = "25"
 # Pin to avoid edition2024 issues (resolved via workspace)
 blake2b_simd = { workspace = true }

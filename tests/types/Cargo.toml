@@ -5,17 +5,11 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-bytecheck = { version = "0.6.12", default-features = false }
-dusk-bytes = "0.1.7"
-dusk-core = "1.4"
-rkyv = { version = "0.7", default-features = false, features = [
-  "alloc",
-  "size_32",
-] }
-serde = { version = "1", default-features = false, features = [
-  "derive",
-  "alloc",
-], optional = true }
+bytecheck = { workspace = true }
+dusk-bytes = { workspace = true }
+dusk-core = { workspace = true }
+rkyv = { workspace = true }
+serde = { workspace = true, optional = true }
 serde_with = { version = "3.9", default-features = false, features = [
   "hex",
 ], optional = true }
