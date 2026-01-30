@@ -1,0 +1,25 @@
+on: [pull_request]
+
+name: Forge CI
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-fmt:
+    name: Rustfmt & Clippy
+    runs-on: core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dsherret/rust-toolchain-file@v1
+      - run: cargo fmt --all -- --check
+      - run: make clippy
+
+  rust-test:
+    name: Run tests
+    needs: rust-fmt
+    runs-on: core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dsherret/rust-toolchain-file@v1
+      - run: make test

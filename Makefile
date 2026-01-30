@@ -1,6 +1,6 @@
 # Workspace Makefile for dusk-forge
 
-.PHONY: all test test-unit test-integration clippy clean help
+.PHONY: all test test-unit test-integration clippy fmt clean help
 
 all: test
 
@@ -13,6 +13,9 @@ test-unit: ## Run unit tests
 
 test-integration: ## Run integration tests (test-bridge)
 	@$(MAKE) -C tests/test-bridge test
+
+fmt: ## Format all Rust source files
+	@cargo fmt --all
 
 clippy: ## Run clippy on all workspace members
 	@echo "Running clippy..."
