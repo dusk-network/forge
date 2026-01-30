@@ -30,9 +30,7 @@ use serde_with::{hex::Hex, serde_as};
 // =========================================================================
 
 /// The `DuskDS` address. This can be either a public account or a contract-id.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
 #[archive_attr(derive(CheckBytes))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Address {
@@ -71,24 +69,18 @@ impl Address {
 // =========================================================================
 
 /// Address on `DuskEVM` to bridge to or from.
-#[derive(
-    Default, Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize,
-)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
 #[archive_attr(derive(CheckBytes))]
 #[cfg_attr(feature = "serde", cfg_eval, serde_as)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct EVMAddress(
-    #[cfg_attr(feature = "serde", serde(with = "serde_evm"))] pub [u8; 20],
-);
+pub struct EVMAddress(#[cfg_attr(feature = "serde", serde(with = "serde_evm"))] pub [u8; 20]);
 
 // =========================================================================
 // SetU64
 // =========================================================================
 
 /// The input argument for setting a `u64` contract state variable.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
 #[archive_attr(derive(CheckBytes))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SetU64 {
@@ -114,9 +106,7 @@ pub enum SetU64 {
 // =========================================================================
 
 /// The input argument for setting a `EVMAddress` contract state variable.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
 #[archive_attr(derive(CheckBytes))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SetEVMAddressOrOffset {
@@ -169,9 +159,7 @@ pub struct Deposit {
 #[derive(Copy, Ord, PartialOrd)] // Required for being a BTreeMap key
 #[cfg_attr(feature = "serde", cfg_eval, serde_as)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct WithdrawalId(
-    #[cfg_attr(feature = "serde", serde_as(as = "Hex"))] pub [u8; 32],
-);
+pub struct WithdrawalId(#[cfg_attr(feature = "serde", serde_as(as = "Hex"))] pub [u8; 32]);
 
 // =========================================================================
 // WithdrawalRequest
@@ -249,9 +237,7 @@ impl TryFrom<WithdrawalRequest> for PendingWithdrawal {
 // =========================================================================
 
 /// The data for a pending withdrawal on the `StandardBridge` state.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
 #[archive_attr(derive(CheckBytes))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PendingWithdrawal {
@@ -276,9 +262,7 @@ const PK_RAW_SIZE: usize = 193;
 /// `extra_data`.
 #[must_use]
 pub fn encode_ds_address(pk: PublicKey) -> Vec<u8> {
-    let mut encoding = Vec::with_capacity(
-        u64::SIZE + PublicKey::SIZE + u64::SIZE + PK_RAW_SIZE,
-    );
+    let mut encoding = Vec::with_capacity(u64::SIZE + PublicKey::SIZE + u64::SIZE + PK_RAW_SIZE);
     encoding.extend_from_slice(&(PublicKey::SIZE as u64).to_be_bytes()[..]);
     encoding.extend_from_slice(&pk.to_bytes()[..]);
     encoding.extend_from_slice(&(PK_RAW_SIZE as u64).to_be_bytes()[..]);
@@ -291,9 +275,7 @@ pub fn encode_ds_address(pk: PublicKey) -> Vec<u8> {
 /// # Errors
 /// Returns an error if the encoded key sizes don't match expected values
 /// or if the raw and compressed keys differ.
-pub fn decode_ds_address(
-    data: impl AsRef<[u8]>,
-) -> Result<PublicKey, &'static str> {
+pub fn decode_ds_address(data: impl AsRef<[u8]>) -> Result<PublicKey, &'static str> {
     let data = data.as_ref();
 
     if data.len() < u64::SIZE + PublicKey::SIZE + u64::SIZE + PK_RAW_SIZE {
@@ -318,9 +300,7 @@ pub fn decode_ds_address(
     }
 
     let offset = 2 * u64::SIZE + PublicKey::SIZE;
-    let pk = unsafe {
-        PublicKey::from_slice_unchecked(&data[offset..offset + PK_RAW_SIZE])
-    };
+    let pk = unsafe { PublicKey::from_slice_unchecked(&data[offset..offset + PK_RAW_SIZE]) };
 
     if pk.to_bytes() != data[u64::SIZE..u64::SIZE + PublicKey::SIZE] {
         return Err(error::INVALID_ENCODING);
@@ -347,9 +327,8 @@ pub trait OwnableUpgradeable {
         use dusk_core::abi;
         self.only_owner();
 
-        let previous_owner =
-            core::mem::replace(self.owner_mut(), Some(new_owner))
-                .expect(error::OWNABLE_INVALID_OWNER);
+        let previous_owner = core::mem::replace(self.owner_mut(), Some(new_owner))
+            .expect(error::OWNABLE_INVALID_OWNER);
 
         abi::emit(
             events::OwnershipTransferred::OWNERSHIP_TRANSFERRED,
@@ -365,8 +344,7 @@ pub trait OwnableUpgradeable {
         use dusk_core::abi;
         self.only_owner();
 
-        let previous_owner = core::mem::take(self.owner_mut())
-            .expect(error::OWNABLE_INVALID_OWNER);
+        let previous_owner = core::mem::take(self.owner_mut()).expect(error::OWNABLE_INVALID_OWNER);
 
         abi::emit(
             events::OwnershipTransferred::OWNERSHIP_RENOUNCED,
@@ -398,24 +376,18 @@ fn initiator() -> Address {
 
     match abi::callstack().len() {
         0 => {
-            panic!(
-                "determining the initiator of a contract query is meaningless"
-            );
+            panic!("determining the initiator of a contract query is meaningless");
         }
         1 => {
             assert!(
-                abi::caller()
-                    .expect("since the callstack is 1, there is a caller")
+                abi::caller().expect("since the callstack is 1, there is a caller")
                     == TRANSFER_CONTRACT
             );
-            Address::External(
-                abi::public_sender().expect(error::SHIELDED_NOT_SUPPORTED),
-            )
+            Address::External(abi::public_sender().expect(error::SHIELDED_NOT_SUPPORTED))
         }
-        _ => Address::Contract(
-            abi::caller()
-                .expect("since the callstack is > 1, there is a caller"),
-        ),
+        _ => {
+            Address::Contract(abi::caller().expect("since the callstack is > 1, there is a caller"))
+        }
     }
 }
 
@@ -435,9 +407,7 @@ pub mod events {
     use rkyv::bytecheck::CheckBytes;
 
     /// Event emitted when the ownership of a contract is transferred.
-    #[derive(
-        Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize,
-    )]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
     #[archive_attr(derive(CheckBytes))]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct OwnershipTransferred {
@@ -620,8 +590,7 @@ pub mod error {
         "The caller account is not authorized to perform this operation.";
 
     /// Error thrown when the owner should be set but isn't.
-    pub const OWNABLE_INVALID_OWNER: &str =
-        "The owner is not a valid owner account, e.g. `None`.";
+    pub const OWNABLE_INVALID_OWNER: &str = "The owner is not a valid owner account, e.g. `None`.";
 
     /// Error message given when the `to` `DuskDS` key in not encoded correctly
     /// in the `extra_data` field of the withdrawal request.
@@ -636,19 +605,17 @@ pub mod error {
 mod serde_evm {
     use alloc::format;
 
-    pub(super) fn serialize<S>(
-        addr: &[u8; 20],
-        ser: S,
-    ) -> Result<S::Ok, S::Error>
+    pub(super) fn serialize<S>(addr: &[u8; 20], ser: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         let hex: alloc::string::String =
-            addr.iter().fold(alloc::string::String::from("0x"), |mut s, b| {
-                use core::fmt::Write;
-                let _ = write!(s, "{b:02x}");
-                s
-            });
+            addr.iter()
+                .fold(alloc::string::String::from("0x"), |mut s, b| {
+                    use core::fmt::Write;
+                    let _ = write!(s, "{b:02x}");
+                    s
+                });
         ser.serialize_str(&hex)
     }
 
@@ -660,13 +627,8 @@ mod serde_evm {
         impl<'de> serde::de::Visitor<'de> for V {
             type Value = [u8; 20];
 
-            fn expecting(
-                &self,
-                f: &mut alloc::fmt::Formatter,
-            ) -> alloc::fmt::Result {
-                f.write_str(
-                    r#"a hex string for 20 bytes, with or without "0x" prefix"#,
-                )
+            fn expecting(&self, f: &mut alloc::fmt::Formatter) -> alloc::fmt::Result {
+                f.write_str(r#"a hex string for 20 bytes, with or without "0x" prefix"#)
             }
 
             fn visit_str<E>(self, mut s: &str) -> Result<Self::Value, E>
@@ -674,25 +636,18 @@ mod serde_evm {
                 E: serde::de::Error,
             {
                 s = s.trim();
-                if let Some(rest) =
-                    s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"))
-                {
+                if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
                     s = rest;
                 }
 
                 if s.len() != 40 {
-                    return Err(E::custom(format!(
-                        "expected 40 hex chars, got {}",
-                        s.len()
-                    )));
+                    return Err(E::custom(format!("expected 40 hex chars, got {}", s.len())));
                 }
 
                 let mut addr = [0u8; 20];
                 for (i, byte) in addr.iter_mut().enumerate() {
                     *byte = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
-                        .map_err(|_| {
-                            E::custom("invalid hex string for 20 byte address")
-                        })?;
+                        .map_err(|_| E::custom("invalid hex string for 20 byte address"))?;
                 }
                 Ok(addr)
             }

@@ -24,10 +24,10 @@ mod test_session;
 
 use test_session::TestSession;
 
+use types::Address as DSAddress;
 use types::{
     EVMAddress, PendingWithdrawal, SetEVMAddressOrOffset, WithdrawalId, WithdrawalRequest,
 };
-use types::Address as DSAddress;
 
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -153,7 +153,12 @@ impl TestBridgeSession {
         value: SetEVMAddressOrOffset,
     ) -> CallReceipt<()> {
         self.session
-            .call_public(sender_sk, TEST_BRIDGE_ID, "set_evm_address_or_offset", &value)
+            .call_public(
+                sender_sk,
+                TEST_BRIDGE_ID,
+                "set_evm_address_or_offset",
+                &value,
+            )
             .expect("set_evm_address_or_offset should succeed")
     }
 
@@ -179,7 +184,12 @@ impl TestBridgeSession {
         amount: u64,
     ) -> CallReceipt<()> {
         self.session
-            .call_public(sender_sk, TEST_BRIDGE_ID, "initiate_transfer", &(from, to, amount))
+            .call_public(
+                sender_sk,
+                TEST_BRIDGE_ID,
+                "initiate_transfer",
+                &(from, to, amount),
+            )
             .expect("initiate_transfer should succeed")
     }
 
@@ -189,7 +199,12 @@ impl TestBridgeSession {
         withdrawal: WithdrawalRequest,
     ) -> CallReceipt<()> {
         self.session
-            .call_public(sender_sk, TEST_BRIDGE_ID, "add_pending_withdrawal", &withdrawal)
+            .call_public(
+                sender_sk,
+                TEST_BRIDGE_ID,
+                "add_pending_withdrawal",
+                &withdrawal,
+            )
             .expect("add_pending_withdrawal should succeed")
     }
 
@@ -203,9 +218,7 @@ impl TestBridgeSession {
 
         receiver
             .into_iter()
-            .map(|data| {
-                test_session::rkyv_deserialize::<(WithdrawalId, PendingWithdrawal)>(&data)
-            })
+            .map(|data| test_session::rkyv_deserialize::<(WithdrawalId, PendingWithdrawal)>(&data))
             .collect()
     }
 
@@ -328,7 +341,10 @@ fn test_method_with_reference_parameter() {
 
     // The macro should receive PendingWithdrawal and pass &withdrawal to the method
     let is_valid = session.verify_withdrawal(valid_withdrawal);
-    assert!(is_valid, "withdrawal with amount > 0 and block_height > 0 should be valid");
+    assert!(
+        is_valid,
+        "withdrawal with amount > 0 and block_height > 0 should be valid"
+    );
 
     // Create an invalid withdrawal (amount = 0)
     let invalid_withdrawal = PendingWithdrawal {
@@ -442,9 +458,10 @@ fn test_trait_default_renounce_only_owner() {
     let mut session = TestBridgeSession::new();
 
     // Try to renounce ownership as non-owner
-    let result = session
-        .session
-        .call_public::<_, ()>(&TEST_SK, TEST_BRIDGE_ID, "renounce_ownership", &());
+    let result =
+        session
+            .session
+            .call_public::<_, ()>(&TEST_SK, TEST_BRIDGE_ID, "renounce_ownership", &());
 
     // Should fail because TEST_SK is not the owner
     assert!(
@@ -472,7 +489,11 @@ fn test_multiple_trait_implementations() {
     let mut session = TestBridgeSession::new();
 
     // Test OwnableUpgradeable trait methods (first trait impl)
-    assert_eq!(session.owner(), Some(*OWNER_ADDRESS), "owner() from OwnableUpgradeable should work");
+    assert_eq!(
+        session.owner(),
+        Some(*OWNER_ADDRESS),
+        "owner() from OwnableUpgradeable should work"
+    );
 
     // Test Pausable trait methods (second trait impl)
     // paused() should return the current paused state
@@ -480,14 +501,20 @@ fn test_multiple_trait_implementations() {
         .session
         .direct_call::<_, bool>(TEST_BRIDGE_ID, "paused", &())
         .expect("paused should succeed");
-    assert!(!paused_result.data, "Contract should not be paused initially");
+    assert!(
+        !paused_result.data,
+        "Contract should not be paused initially"
+    );
 
     // toggle_pause() should toggle and return the new state
     let toggle_result = session
         .session
         .call_public::<_, bool>(&OWNER_SK, TEST_BRIDGE_ID, "toggle_pause", &())
         .expect("toggle_pause should succeed");
-    assert!(toggle_result.data, "toggle_pause should return true (now paused)");
+    assert!(
+        toggle_result.data,
+        "toggle_pause should return true (now paused)"
+    );
 
     // paused() should now return true
     let paused_result = session
@@ -501,10 +528,17 @@ fn test_multiple_trait_implementations() {
         .session
         .call_public::<_, bool>(&OWNER_SK, TEST_BRIDGE_ID, "toggle_pause", &())
         .expect("toggle_pause should succeed");
-    assert!(!toggle_result.data, "toggle_pause should return false (now unpaused)");
+    assert!(
+        !toggle_result.data,
+        "toggle_pause should return false (now unpaused)"
+    );
 
     // Verify OwnableUpgradeable still works after using Pausable
-    assert_eq!(session.owner(), Some(*OWNER_ADDRESS), "owner() should still work");
+    assert_eq!(
+        session.owner(),
+        Some(*OWNER_ADDRESS),
+        "owner() should still work"
+    );
 }
 
 #[test]
@@ -530,7 +564,10 @@ fn test_nested_generic_return_type() {
     assert!(result.data.is_some(), "Should find the pending withdrawal");
     let (returned_id, returned_pw) = result.data.unwrap();
     assert_eq!(returned_id.0, [1u8; 32], "WithdrawalId should match");
-    assert_eq!(returned_pw.amount, 1000, "PendingWithdrawal amount should match");
+    assert_eq!(
+        returned_pw.amount, 1000,
+        "PendingWithdrawal amount should match"
+    );
 
     // Test with non-existent ID
     let missing_id = WithdrawalId([99u8; 32]);
@@ -543,7 +580,10 @@ fn test_nested_generic_return_type() {
         )
         .expect("pending_withdrawal_with_id should succeed");
 
-    assert!(result.data.is_none(), "Should return None for non-existent ID");
+    assert!(
+        result.data.is_none(),
+        "Should return None for non-existent ID"
+    );
 }
 
 // =============================================================================
@@ -572,11 +612,17 @@ fn test_streaming_function_empty() {
 
     // Call streaming function with no pending withdrawals
     let results = session.collect_pending_withdrawals();
-    assert!(results.is_empty(), "Should return empty when no pending withdrawals");
+    assert!(
+        results.is_empty(),
+        "Should return empty when no pending withdrawals"
+    );
 
     // Same for IDs only
     let ids = session.collect_pending_withdrawal_ids();
-    assert!(ids.is_empty(), "Should return empty IDs when no pending withdrawals");
+    assert!(
+        ids.is_empty(),
+        "Should return empty IDs when no pending withdrawals"
+    );
 }
 
 #[test]
@@ -589,12 +635,23 @@ fn test_streaming_function_single_withdrawal() {
 
     // Call streaming function - should feed one tuple
     let results = session.collect_pending_withdrawals();
-    assert_eq!(results.len(), 1, "Should have exactly one pending withdrawal");
+    assert_eq!(
+        results.len(),
+        1,
+        "Should have exactly one pending withdrawal"
+    );
 
     let (id, pending) = &results[0];
     assert_eq!(id.0, [1u8; 32], "WithdrawalId should match");
-    assert_eq!(pending.from, EVMAddress([1u8; 20]), "from address should match");
-    assert_eq!(pending.amount, 1000, "amount should match (converted to LUX)");
+    assert_eq!(
+        pending.from,
+        EVMAddress([1u8; 20]),
+        "from address should match"
+    );
+    assert_eq!(
+        pending.amount, 1000,
+        "amount should match (converted to LUX)"
+    );
 
     // Test IDs only streaming function
     let ids = session.collect_pending_withdrawal_ids();
@@ -619,7 +676,11 @@ fn test_streaming_function_multiple_withdrawals() {
     // Verify all withdrawals are present (order may vary due to BTreeMap)
     let mut found_ids: Vec<u8> = results.iter().map(|(id, _)| id.0[0]).collect();
     found_ids.sort();
-    assert_eq!(found_ids, vec![1, 2, 3, 4, 5], "All withdrawal IDs should be present");
+    assert_eq!(
+        found_ids,
+        vec![1, 2, 3, 4, 5],
+        "All withdrawal IDs should be present"
+    );
 
     // Verify amounts match their IDs
     for (id, pending) in &results {
@@ -652,18 +713,31 @@ fn test_streaming_function_after_finalization() {
 
     // Verify we have 3 withdrawals
     let results = session.collect_pending_withdrawals();
-    assert_eq!(results.len(), 3, "Should have 3 pending withdrawals initially");
+    assert_eq!(
+        results.len(),
+        3,
+        "Should have 3 pending withdrawals initially"
+    );
 
     // Finalize one withdrawal (ID = 2)
     let id_to_finalize = WithdrawalId([2u8; 32]);
     session
         .session
-        .call_public::<_, ()>(&OWNER_SK, TEST_BRIDGE_ID, "finalize_withdrawal", &id_to_finalize)
+        .call_public::<_, ()>(
+            &OWNER_SK,
+            TEST_BRIDGE_ID,
+            "finalize_withdrawal",
+            &id_to_finalize,
+        )
         .expect("finalize_withdrawal should succeed");
 
     // Streaming should now return only 2 withdrawals
     let results = session.collect_pending_withdrawals();
-    assert_eq!(results.len(), 2, "Should have 2 pending withdrawals after finalization");
+    assert_eq!(
+        results.len(),
+        2,
+        "Should have 2 pending withdrawals after finalization"
+    );
 
     // Verify the finalized one is gone
     let remaining_ids: Vec<u8> = results.iter().map(|(id, _)| id.0[0]).collect();

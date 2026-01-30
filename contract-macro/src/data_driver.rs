@@ -228,9 +228,15 @@ fn generate_decode_output_arms(
 
             // Use feed_type if present, otherwise use output_type
             let (decode_type, type_str) = if let Some(feed_type) = &f.feed_type {
-                (get_resolved_type(feed_type, type_map), feed_type.to_string())
+                (
+                    get_resolved_type(feed_type, type_map),
+                    feed_type.to_string(),
+                )
             } else {
-                (get_resolved_type(&f.output_type, type_map), f.output_type.to_string())
+                (
+                    get_resolved_type(&f.output_type, type_map),
+                    f.output_type.to_string(),
+                )
             };
 
             if f.is_custom {
@@ -278,7 +284,9 @@ fn generate_decode_event_arms(events: &[EventInfo], type_map: &TypeMap) -> Vec<T
             let data_type = get_resolved_type(&e.data_type, type_map);
 
             // Get the resolved topic path from the type_map
-            let resolved_topic = type_map.get(topic_str).map_or(topic_str.clone(), Clone::clone);
+            let resolved_topic = type_map
+                .get(topic_str)
+                .map_or(topic_str.clone(), Clone::clone);
 
             // Try to parse the resolved topic as a path for constant resolution
             if let Ok(topic_path) = syn::parse_str::<syn::Path>(&resolved_topic) {
@@ -418,7 +426,12 @@ mod tests {
         let mut type_map = HashMap::new();
         type_map.insert("Address".to_string(), "evm_core::Address".to_string());
 
-        let functions = vec![make_function("init", quote! { Address }, quote! { () }, false)];
+        let functions = vec![make_function(
+            "init",
+            quote! { Address },
+            quote! { () },
+            false,
+        )];
         let arms = generate_encode_input_arms(&functions, &type_map, &[]);
 
         assert_eq!(arms.len(), 1);
@@ -435,7 +448,12 @@ mod tests {
     fn test_encode_input_unit_type() {
         let type_map = HashMap::new();
 
-        let functions = vec![make_function("is_paused", quote! { () }, quote! { bool }, false)];
+        let functions = vec![make_function(
+            "is_paused",
+            quote! { () },
+            quote! { bool },
+            false,
+        )];
         let arms = generate_encode_input_arms(&functions, &type_map, &[]);
 
         assert_eq!(arms.len(), 1);
@@ -542,7 +560,12 @@ mod tests {
         let mut type_map = HashMap::new();
         type_map.insert("Deposit".to_string(), "evm_core::Deposit".to_string());
 
-        let functions = vec![make_function("deposit", quote! { Deposit }, quote! { () }, false)];
+        let functions = vec![make_function(
+            "deposit",
+            quote! { Deposit },
+            quote! { () },
+            false,
+        )];
         let arms = generate_decode_input_arms(&functions, &type_map, &[]);
 
         assert_eq!(arms.len(), 1);
@@ -556,7 +579,12 @@ mod tests {
     fn test_decode_input_custom_returns_error() {
         let type_map = HashMap::new();
 
-        let functions = vec![make_function("custom_fn", quote! { CustomType }, quote! { () }, true)];
+        let functions = vec![make_function(
+            "custom_fn",
+            quote! { CustomType },
+            quote! { () },
+            true,
+        )];
         let arms = generate_decode_input_arms(&functions, &type_map, &[]);
 
         assert_eq!(arms.len(), 1);
@@ -800,7 +828,12 @@ mod tests {
     fn test_decode_output_bool() {
         let type_map = HashMap::new();
 
-        let functions = vec![make_function("is_paused", quote! { () }, quote! { bool }, false)];
+        let functions = vec![make_function(
+            "is_paused",
+            quote! { () },
+            quote! { bool },
+            false,
+        )];
         let arms = generate_decode_output_arms(&functions, &type_map, &[]);
 
         assert_eq!(arms.len(), 1);
@@ -944,7 +977,10 @@ mod tests {
     #[test]
     fn test_decode_output_feed_type_simple() {
         let mut type_map = HashMap::new();
-        type_map.insert("WithdrawalId".to_string(), "evm_core::WithdrawalId".to_string());
+        type_map.insert(
+            "WithdrawalId".to_string(),
+            "evm_core::WithdrawalId".to_string(),
+        );
 
         // Function returns () but feeds WithdrawalId
         let functions = vec![make_function_with_feed(
@@ -970,7 +1006,12 @@ mod tests {
         let type_map = HashMap::new();
 
         // Function without feed_type should use output_type as before
-        let functions = vec![make_function("is_paused", quote! { () }, quote! { bool }, false)];
+        let functions = vec![make_function(
+            "is_paused",
+            quote! { () },
+            quote! { bool },
+            false,
+        )];
         let arms = generate_decode_output_arms(&functions, &type_map, &[]);
 
         assert_eq!(arms.len(), 1);

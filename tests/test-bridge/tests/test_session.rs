@@ -11,14 +11,10 @@
 
 use std::sync::mpsc;
 
-use rkyv::bytecheck::CheckBytes;
 use dusk_core::abi::{
-    ContractError, ContractId, Metadata, StandardBufSerializer,
-    CONTRACT_ID_BYTES,
+    ContractError, ContractId, Metadata, StandardBufSerializer, CONTRACT_ID_BYTES,
 };
-use dusk_core::signatures::bls::{
-    PublicKey as AccountPublicKey, SecretKey as AccountSecretKey,
-};
+use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as AccountSecretKey};
 use dusk_core::stake::STAKE_CONTRACT;
 use dusk_core::transfer::data::ContractCall;
 use dusk_core::transfer::moonlight::AccountData;
@@ -28,14 +24,10 @@ use dusk_core::transfer::phoenix::{
 };
 use dusk_core::transfer::{Transaction, TRANSFER_CONTRACT};
 use dusk_core::{BlsScalar, JubJubScalar, LUX};
-use dusk_vm::{
-    execute, CallReceipt, ContractData, Error as VMError, ExecutionConfig,
-    Session, VM,
-};
+use dusk_vm::{execute, CallReceipt, ContractData, Error as VMError, ExecutionConfig, Session, VM};
 use ff::Field;
-use rkyv::ser::serializers::{
-    BufferScratch, BufferSerializer, CompositeSerializer,
-};
+use rkyv::bytecheck::CheckBytes;
+use rkyv::ser::serializers::{BufferScratch, BufferSerializer, CompositeSerializer};
 use rkyv::ser::Serializer;
 use rkyv::validation::validators::DefaultValidator;
 use rkyv::{check_archived_root, Archive, Deserialize, Infallible, Serialize};
@@ -93,10 +85,7 @@ impl TestSession {
 
     /// Query the transfer-contract for the account linked to a given
     /// public-key.
-    pub fn account(
-        &mut self,
-        pk: &AccountPublicKey,
-    ) -> Result<AccountData, VMError> {
+    pub fn account(&mut self, pk: &AccountPublicKey) -> Result<AccountData, VMError> {
         self.0
             .call(TRANSFER_CONTRACT, "account", pk, GAS_LIMIT)
             .map(|r| r.data)
@@ -104,10 +93,7 @@ impl TestSession {
 
     /// Query the transfer-contract for the account linked to a given
     /// public-key.
-    pub fn contract_balance(
-        &mut self,
-        contract_id: &ContractId,
-    ) -> Result<u64, VMError> {
+    pub fn contract_balance(&mut self, contract_id: &ContractId) -> Result<u64, VMError> {
         self.0
             .call(
                 TRANSFER_CONTRACT,
@@ -130,8 +116,7 @@ impl TestSession {
         A: for<'b> Serialize<StandardBufSerializer<'b>>,
         A::Archived: for<'b> CheckBytes<DefaultValidator<'b>>,
         R: Archive,
-        R::Archived: Deserialize<R, Infallible>
-            + for<'b> CheckBytes<DefaultValidator<'b>>,
+        R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
     {
         self.0
             .call::<_, R>(contract, fn_name, fn_arg, u64::MAX)
@@ -155,8 +140,7 @@ impl TestSession {
         A: for<'b> Serialize<StandardBufSerializer<'b>>,
         A::Archived: for<'b> CheckBytes<DefaultValidator<'b>>,
         R: Archive,
-        R::Archived: Deserialize<R, Infallible>
-            + for<'b> CheckBytes<DefaultValidator<'b>>,
+        R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
     {
         self.0
             .feeder_call::<_, R>(contract, fn_name, fn_arg, u64::MAX, feeder)
@@ -180,8 +164,7 @@ impl TestSession {
         A: for<'b> Serialize<StandardBufSerializer<'b>>,
         A::Archived: for<'b> CheckBytes<DefaultValidator<'b>>,
         R: Archive,
-        R::Archived: Deserialize<R, Infallible>
-            + for<'b> CheckBytes<DefaultValidator<'b>>,
+        R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
     {
         self.call_public_with_deposit(sender_sk, contract, fn_name, fn_arg, 0)
     }
@@ -199,8 +182,7 @@ impl TestSession {
         A: for<'b> Serialize<StandardBufSerializer<'b>>,
         A::Archived: for<'b> CheckBytes<DefaultValidator<'b>>,
         R: Archive,
-        R::Archived: Deserialize<R, Infallible>
-            + for<'b> CheckBytes<DefaultValidator<'b>>,
+        R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
     {
         let contract_call = ContractCall {
             contract,
@@ -256,8 +238,7 @@ impl TestSession {
         A: for<'b> Serialize<StandardBufSerializer<'b>>,
         A::Archived: for<'b> CheckBytes<DefaultValidator<'b>>,
         R: Archive,
-        R::Archived: Deserialize<R, Infallible>
-            + for<'b> CheckBytes<DefaultValidator<'b>>,
+        R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
     {
         let contract_call = ContractCall {
             contract,
@@ -267,8 +248,7 @@ impl TestSession {
 
         let sender_pk = ShieldedPublicKey::from(sender_sk);
 
-        let root = root(&mut self.0)
-            .expect("Getting the phoenix-notes root should be successful");
+        let root = root(&mut self.0).expect("Getting the phoenix-notes root should be successful");
 
         assert!(
             input_positions.len() <= 4,
@@ -285,9 +265,7 @@ impl TestSession {
             );
             let note = &leaves[0].note;
             let opening = opening(&mut self.0, *pos)
-                .expect(
-                    "Querying the opening for the given position should succeed",
-                )
+                .expect("Querying the opening for the given position should succeed")
                 .expect("An opening should exist for a note in the tree");
 
             assert!(opening.verify(NoteTreeItem::new(note.hash(), ())));
@@ -343,8 +321,7 @@ impl TestSession {
         let mut session = VM::genesis_session(&vm, 1);
 
         // deploy transfer contract
-        let transfer_contract =
-            include_bytes!("genesis-contracts/transfer_contract.wasm");
+        let transfer_contract = include_bytes!("genesis-contracts/transfer_contract.wasm");
 
         session
             .deploy(
@@ -357,8 +334,7 @@ impl TestSession {
             .expect("Deploying the transfer contract should succeed");
 
         // deploy stake contract
-        let stake_contract =
-            include_bytes!("genesis-contracts/stake_contract.wasm");
+        let stake_contract = include_bytes!("genesis-contracts/stake_contract.wasm");
 
         session
             .deploy(
@@ -388,12 +364,7 @@ impl TestSession {
                 sender_blinder,
             );
             session
-                .call::<_, Note>(
-                    TRANSFER_CONTRACT,
-                    "push_note",
-                    &(pos, note),
-                    GAS_LIMIT,
-                )
+                .call::<_, Note>(TRANSFER_CONTRACT, "push_note", &(pos, note), GAS_LIMIT)
                 .expect("Pushing genesis note should succeed");
         }
         // update the root after the notes have been inserted
@@ -446,11 +417,9 @@ impl TestSession {
 pub fn rkyv_deserialize<R>(serialized: impl AsRef<[u8]>) -> R
 where
     R: Archive,
-    R::Archived:
-        Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
+    R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
 {
-    let ta = check_archived_root::<R>(&serialized.as_ref())
-        .expect("Failed to deserialize data");
+    let ta = check_archived_root::<R>(&serialized.as_ref()).expect("Failed to deserialize data");
     ta.deserialize(&mut Infallible)
         .expect("Failed to deserialize using rkyv")
 }
@@ -483,8 +452,7 @@ pub fn assert_contract_panic<R>(
     expected_panic: &str,
 ) where
     R: Archive,
-    R::Archived:
-        Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
+    R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
 {
     let contract_err = match call_result {
         Ok(_) => panic!("Contract call shouldn't pass"),
@@ -498,10 +466,7 @@ pub fn assert_contract_panic<R>(
     }
 }
 
-fn leaves_from_pos(
-    session: &mut Session,
-    pos: u64,
-) -> Result<Vec<NoteLeaf>, VMError> {
+fn leaves_from_pos(session: &mut Session, pos: u64) -> Result<Vec<NoteLeaf>, VMError> {
     let (feeder, receiver) = mpsc::channel();
 
     session.feeder_call::<_, ()>(
@@ -524,10 +489,7 @@ fn root(session: &mut Session) -> Result<BlsScalar, VMError> {
         .map(|r| r.data)
 }
 
-fn opening(
-    session: &mut Session,
-    pos: u64,
-) -> Result<Option<NoteOpening>, VMError> {
+fn opening(session: &mut Session, pos: u64) -> Result<Option<NoteOpening>, VMError> {
     session
         .call(TRANSFER_CONTRACT, "opening", &pos, GAS_LIMIT)
         .map(|r| r.data)
