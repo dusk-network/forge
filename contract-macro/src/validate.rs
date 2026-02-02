@@ -11,7 +11,6 @@ use syn::{FnArg, ImplItem, ImplItemFn, ItemImpl, ReturnType, Type, Visibility};
 /// Validate that a public method has a supported signature for extern wrapper generation.
 ///
 /// Returns an error if the method:
-/// - Has no `self` receiver (associated function)
 /// - Has generic type or const parameters
 /// - Is async
 /// - Consumes `self` (not `&self` or `&mut self`)
@@ -69,34 +68,17 @@ pub(crate) fn public_method(method: &ImplItemFn) -> Result<(), syn::Error> {
         ));
     }
 
-    // Check for self receiver
-    let receiver = method.sig.inputs.first().and_then(|arg| {
-        if let FnArg::Receiver(r) = arg {
-            Some(r)
-        } else {
-            None
+    // Check for self receiver: if present, must be borrowed (not consumed)
+    if let Some(FnArg::Receiver(receiver)) = method.sig.inputs.first() {
+        if receiver.reference.is_none() {
+            return Err(syn::Error::new_spanned(
+                receiver,
+                format!(
+                    "public method `{name}` cannot consume `self`; \
+                     use `&self` or `&mut self` instead"
+                ),
+            ));
         }
-    });
-
-    let Some(receiver) = receiver else {
-        return Err(syn::Error::new_spanned(
-            &method.sig,
-            format!(
-                "public method `{name}` must have a `self` receiver; \
-                 associated functions cannot be exposed as contract methods"
-            ),
-        ));
-    };
-
-    // Check that self is borrowed, not consumed
-    if receiver.reference.is_none() {
-        return Err(syn::Error::new_spanned(
-            receiver,
-            format!(
-                "public method `{name}` cannot consume `self`; \
-                 use `&self` or `&mut self` instead"
-            ),
-        ));
     }
 
     Ok(())
@@ -401,10 +383,9 @@ mod tests {
     #[test]
     fn test_validate_method_no_self() {
         let method: ImplItemFn = syn::parse_quote! {
-            pub fn new() -> Self { Self }
+            pub fn empty_address() -> Address { Address::default() }
         };
-        let err = public_method(&method).unwrap_err();
-        assert!(err.to_string().contains("must have a `self` receiver"));
+        assert!(public_method(&method).is_ok());
     }
 
     #[test]

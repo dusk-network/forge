@@ -23,19 +23,18 @@
 #[cfg(not(any(feature = "contract", feature = "data-driver")))]
 compile_error!("Enable either 'contract' or 'data-driver' feature for WASM builds");
 
-extern crate alloc;
-
 /// Test bridge contract demonstrating macro features.
 #[dusk_forge::contract]
 mod test_bridge {
+    extern crate alloc;
+
     use alloc::collections::BTreeMap;
 
     use dusk_core::abi;
     use types::events;
-    use types::{Address as DSAddress, OwnableUpgradeable};
     use types::{
-        Deposit, EVMAddress, PendingWithdrawal, SetEVMAddressOrOffset, SetU64, WithdrawalId,
-        WithdrawalRequest,
+        Address as DSAddress, Deposit, EVMAddress, OwnableUpgradeable, PendingWithdrawal,
+        SetEVMAddressOrOffset, SetU64, WithdrawalId, WithdrawalRequest,
     };
 
     // =========================================================================
@@ -141,6 +140,11 @@ mod test_bridge {
         /// Returns the other bridge address.
         pub fn other_bridge(&self) -> EVMAddress {
             self.other_bridge
+        }
+
+        /// Returns an empty address to test associated functions
+        pub fn empty_evm_address() -> EVMAddress {
+            EVMAddress([0u8; 20])
         }
     }
 
