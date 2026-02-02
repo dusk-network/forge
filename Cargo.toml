@@ -28,7 +28,7 @@ edition = "2021"
 
 [workspace.dependencies]
 # Workspace internal dependencies
-dusk-forge-contract = { version = "0.1.0", path = "./contract-macro/" }
+dusk-forge-contract = { version = "0.1.1", path = "./contract-macro/" }
 
 dusk-core = "1.4"
 bytecheck = { version = "0.6.12", default-features = false }
