@@ -1,0 +1,19 @@
+[package]
+name = "types"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+bytecheck = { workspace = true }
+dusk-bytes = { workspace = true }
+dusk-core = { workspace = true }
+rkyv = { workspace = true }
+serde = { workspace = true, optional = true }
+serde_with = { version = "3.9", default-features = false, features = [
+  "hex",
+], optional = true }
+
+[features]
+serde = ["dep:serde", "dep:serde_with", "dusk-core/serde"]
+abi = ["dusk-core/abi-dlmalloc"]

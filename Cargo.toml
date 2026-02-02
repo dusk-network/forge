@@ -10,19 +10,17 @@ categories = ["development-tools"]
 
 [dependencies]
 dusk-forge-contract = { workspace = true }
-serde = { version = "1", default-features = false, features = [
-  "derive",
+serde = { workspace = true }
+serde_json = { workspace = true, default-features = false, features = [
   "alloc",
 ] }
-serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
-dusk-core = "1.4"
-evm-core = { path = "../DuskEVM/L1Contracts/core" }
+dusk-core = { workspace = true }
 
 [workspace]
 resolver = "2"
-members = ["contract-macro", "tests/test-bridge"]
+members = ["contract-macro", "tests/types", "tests/test-bridge"]
 exclude = ["contract-template"]
 
 [workspace.package]
@@ -31,7 +29,22 @@ edition = "2021"
 [workspace.dependencies]
 # Workspace internal dependencies
 dusk-forge-contract = { version = "0.1.0", path = "./contract-macro/" }
-# dusk-forge-contract = { version = "0.2.0-alpha.1", path = "./contract-macro/" }
+
+dusk-core = "1.4"
+bytecheck = { version = "0.6.12", default-features = false }
+dusk-bytes = "0.1.7"
+rkyv = { version = "0.7", default-features = false, features = [
+  "alloc",
+  "size_32",
+] }
+serde = { version = "1", default-features = false, features = [
+  "derive",
+  "alloc",
+] }
+serde_json = { version = "1", default-features = false }
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "visit"] }
 
 # Pin to match L1Contracts versions
 dusk-vm = { version = "=1.4.0", default-features = false }

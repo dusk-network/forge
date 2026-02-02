@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Remove external path dependencies from test-bridge (evm-core, tests-setup)
+- Add local `types` crate with bridge types for self-contained testing
+
+### Removed
+
+- Remove `Cargo.lock` from version control
+- Remove outdated design documents (`docs/future-type-introspection.md`, `docs/poc.rs`)
 
 ## [0.2.1] - 2026-01-29
 

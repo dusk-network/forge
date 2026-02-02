@@ -31,12 +31,12 @@ mod test_bridge {
     use alloc::collections::BTreeMap;
 
     use dusk_core::abi;
-    use evm_core::standard_bridge::events;
-    use evm_core::standard_bridge::{
+    use types::events;
+    use types::{
         Deposit, EVMAddress, PendingWithdrawal, SetEVMAddressOrOffset, SetU64, WithdrawalId,
         WithdrawalRequest,
     };
-    use evm_core::{Address as DSAddress, OwnableUpgradeable};
+    use types::{Address as DSAddress, OwnableUpgradeable};
 
     // =========================================================================
     // Test trait for multiple trait implementation testing
@@ -366,7 +366,7 @@ mod test_bridge {
     #[contract(encode_input = "extra_data")]
     fn encode_extra_data(json: &str) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error> {
         // Parse the input JSON as an EVMAddress and return its bytes
-        let addr: evm_core::standard_bridge::EVMAddress = serde_json::from_str(json)?;
+        let addr: types::EVMAddress = serde_json::from_str(json)?;
         Ok(addr.0.to_vec())
     }
 
@@ -384,7 +384,7 @@ mod test_bridge {
         }
         let mut addr = [0u8; 20];
         addr.copy_from_slice(rkyv);
-        let evm_addr = evm_core::standard_bridge::EVMAddress(addr);
+        let evm_addr = types::EVMAddress(addr);
         Ok(serde_json::to_value(evm_addr)?)
     }
 }
