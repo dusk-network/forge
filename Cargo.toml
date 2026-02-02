@@ -1,6 +1,6 @@
 [package]
 name = "dusk-forge"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "A smart contract development framework for Dusk"
 license = "MPL-2.0"

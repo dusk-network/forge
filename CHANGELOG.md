@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-02-02
+
 ### Changed
 
 - Remove external path dependencies from test-bridge (evm-core, tests-setup)
@@ -16,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add feature-gate compile_error to the contract macro [#3]
 - Add compile_error for mutually exclusive contract/data-driver features
+
+### Fixed
+
+- Allow associated functions as contract methods [#6]
 
 ### Removed
 
@@ -52,9 +58,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- Issues -->
 [#3]: https://github.com/dusk-network/forge/issues/3
+[#6]: https://github.com/dusk-network/forge/issues/6
 
 <!-- Releases -->
 [Unreleased]: https://github.com/dusk-network/forge/compare/v0.2.1...HEAD
+[0.2.2]: https://github.com/dusk-network/forge/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/dusk-network/forge/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/dusk-network/forge/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Dusk-Forge/dusk-forge/releases/tag/v0.1.0
