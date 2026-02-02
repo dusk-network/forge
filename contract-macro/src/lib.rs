@@ -568,6 +568,10 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // - Contract module wrapped in #[cfg(not(feature = "data-driver"))]
     // - Data driver module at crate root with #[cfg(feature = "data-driver")]
     let output = quote! {
+        #[cfg(not(any(feature = "contract", feature = "data-driver")))]
+        compile_error!("Enable either 'contract' or 'data-driver' feature for WASM builds");
+
+        #[cfg(any(feature = "contract", feature = "data-driver"))]
         #schema
 
         #[cfg(not(feature = "data-driver"))]
