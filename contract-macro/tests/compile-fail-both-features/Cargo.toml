@@ -1,0 +1,15 @@
+[package]
+name = "both-features-test"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[features]
+default = ["contract", "data-driver"]
+contract = []
+data-driver = []
+
+[dependencies]
+dusk-forge-contract = { path = "../../" }

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add feature-gate compile_error to the contract macro [#3]
+- Add compile_error for mutually exclusive contract/data-driver features
 
 ### Removed
 

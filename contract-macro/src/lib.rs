@@ -571,6 +571,9 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #[cfg(not(any(feature = "contract", feature = "data-driver")))]
         compile_error!("Enable either 'contract' or 'data-driver' feature for WASM builds");
 
+        #[cfg(all(feature = "contract", feature = "data-driver"))]
+        compile_error!("Features 'contract' and 'data-driver' are mutually exclusive");
+
         #[cfg(any(feature = "contract", feature = "data-driver"))]
         #schema
 
