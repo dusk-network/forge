@@ -43,7 +43,7 @@ fn get_schema_from_wasm() -> String {
     // Use a fixed offset in linear memory for the output buffer
     // WASM data segment typically starts at a low address, so we use a high offset
     let buf_offset: i32 = 1024 * 64; // 64KB offset should be safe
-    let buf_size: i32 = 16 * 1024;   // 16KB buffer
+    let buf_size: i32 = 16 * 1024; // 16KB buffer
 
     // Ensure memory is large enough
     let current_pages = memory.size(&store);
@@ -88,7 +88,9 @@ fn test_schema_has_functions() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let functions = schema["functions"]
+        .as_array()
+        .expect("functions should be an array");
     let fn_names: Vec<&str> = functions
         .iter()
         .map(|f| f["name"].as_str().unwrap())
@@ -99,18 +101,36 @@ fn test_schema_has_functions() {
     assert!(fn_names.contains(&"is_paused"), "missing is_paused");
     assert!(fn_names.contains(&"pause"), "missing pause");
     assert!(fn_names.contains(&"unpause"), "missing unpause");
-    assert!(fn_names.contains(&"finalization_period"), "missing finalization_period");
+    assert!(
+        fn_names.contains(&"finalization_period"),
+        "missing finalization_period"
+    );
     assert!(fn_names.contains(&"deposit"), "missing deposit");
-    assert!(fn_names.contains(&"pending_withdrawal"), "missing pending_withdrawal");
+    assert!(
+        fn_names.contains(&"pending_withdrawal"),
+        "missing pending_withdrawal"
+    );
 
     // Check exposed trait methods are present
     assert!(fn_names.contains(&"owner"), "missing owner");
-    assert!(fn_names.contains(&"transfer_ownership"), "missing transfer_ownership");
-    assert!(fn_names.contains(&"renounce_ownership"), "missing renounce_ownership");
+    assert!(
+        fn_names.contains(&"transfer_ownership"),
+        "missing transfer_ownership"
+    );
+    assert!(
+        fn_names.contains(&"renounce_ownership"),
+        "missing renounce_ownership"
+    );
 
     // Check private methods are NOT present
-    assert!(!fn_names.contains(&"only_owner"), "only_owner should not be exported");
-    assert!(!fn_names.contains(&"owner_mut"), "owner_mut should not be exported");
+    assert!(
+        !fn_names.contains(&"only_owner"),
+        "only_owner should not be exported"
+    );
+    assert!(
+        !fn_names.contains(&"owner_mut"),
+        "owner_mut should not be exported"
+    );
 }
 
 #[test]
@@ -119,7 +139,9 @@ fn test_schema_has_events() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let events = schema["events"].as_array().expect("events should be an array");
+    let events = schema["events"]
+        .as_array()
+        .expect("events should be an array");
     let event_topics: Vec<&str> = events
         .iter()
         .map(|e| e["topic"].as_str().unwrap())
@@ -131,7 +153,9 @@ fn test_schema_has_events() {
         "missing PauseToggled event"
     );
     assert!(
-        event_topics.iter().any(|t| t.contains("TransactionDeposited")),
+        event_topics
+            .iter()
+            .any(|t| t.contains("TransactionDeposited")),
         "missing TransactionDeposited event"
     );
     assert!(
@@ -146,7 +170,9 @@ fn test_schema_has_imports() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let imports = schema["imports"].as_array().expect("imports should be an array");
+    let imports = schema["imports"]
+        .as_array()
+        .expect("imports should be an array");
     let import_names: Vec<&str> = imports
         .iter()
         .map(|i| i["name"].as_str().unwrap())
@@ -154,7 +180,10 @@ fn test_schema_has_imports() {
 
     // Check key imports
     assert!(import_names.contains(&"Deposit"), "missing Deposit import");
-    assert!(import_names.contains(&"EVMAddress"), "missing EVMAddress import");
+    assert!(
+        import_names.contains(&"EVMAddress"),
+        "missing EVMAddress import"
+    );
     assert!(import_names.contains(&"events"), "missing events import");
 }
 
@@ -237,7 +266,10 @@ impl DataDriverWasm {
 
         let encode_fn = self
             .instance
-            .get_typed_func::<(i32, i32, i32, i32, i32, i32), i32>(&mut self.store, "encode_input_fn")
+            .get_typed_func::<(i32, i32, i32, i32, i32, i32), i32>(
+                &mut self.store,
+                "encode_input_fn",
+            )
             .expect("Failed to get encode_input_fn function");
 
         // Write fn_name to memory
@@ -378,13 +410,16 @@ fn test_custom_data_driver_function_decode() {
     let mut driver = DataDriverWasm::new();
 
     // Test decoding raw bytes back to EVMAddress via the custom "extra_data" function
-    let rkyv_data: Vec<u8> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    let rkyv_data: Vec<u8> = vec![
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+    ];
     let decoded = driver
         .decode_output("extra_data", &rkyv_data)
         .expect("Failed to decode extra_data");
 
     // The custom decoder returns the EVMAddress as a hex string
-    let expected: serde_json::Value = serde_json::json!("0x0102030405060708090a0b0c0d0e0f1011121314");
+    let expected: serde_json::Value =
+        serde_json::json!("0x0102030405060708090a0b0c0d0e0f1011121314");
     assert_eq!(decoded, expected);
 }
 
@@ -421,7 +456,9 @@ fn test_schema_has_feed_functions() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let functions = schema["functions"]
+        .as_array()
+        .expect("functions should be an array");
     let fn_names: Vec<&str> = functions
         .iter()
         .map(|f| f["name"].as_str().unwrap())
@@ -452,8 +489,8 @@ fn test_schema_has_feed_functions() {
 #[test]
 fn test_feed_function_decode_uses_feed_type() {
     use dusk_core::abi::ContractId;
-    use types::{EVMAddress, PendingWithdrawal, WithdrawalId};
     use types::Address as DSAddress;
+    use types::{EVMAddress, PendingWithdrawal, WithdrawalId};
 
     let mut driver = DataDriverWasm::new();
 
@@ -469,8 +506,8 @@ fn test_feed_function_decode_uses_feed_type() {
     };
 
     // Serialize the tuple using rkyv
-    let rkyv_data = rkyv::to_bytes::<_, 256>(&(withdrawal_id, pending))
-        .expect("Failed to serialize tuple");
+    let rkyv_data =
+        rkyv::to_bytes::<_, 256>(&(withdrawal_id, pending)).expect("Failed to serialize tuple");
 
     // Decode using the data-driver
     // This should use the feed_type "(WithdrawalId, PendingWithdrawal)", NOT return null
@@ -495,8 +532,14 @@ fn test_feed_function_decode_uses_feed_type() {
     );
 
     // Second element is PendingWithdrawal struct
-    assert!(arr[1].is_object(), "Second element should be PendingWithdrawal object");
-    assert!(arr[1]["amount"].is_number(), "PendingWithdrawal should have amount field");
+    assert!(
+        arr[1].is_object(),
+        "Second element should be PendingWithdrawal object"
+    );
+    assert!(
+        arr[1]["amount"].is_number(),
+        "PendingWithdrawal should have amount field"
+    );
     assert_eq!(arr[1]["amount"], 1000);
     assert_eq!(arr[1]["block_height"], 42);
 }
@@ -511,8 +554,8 @@ fn test_feed_function_simple_type_decode() {
     let withdrawal_id = WithdrawalId([3u8; 32]);
 
     // Serialize using rkyv
-    let rkyv_data = rkyv::to_bytes::<_, 256>(&withdrawal_id)
-        .expect("Failed to serialize WithdrawalId");
+    let rkyv_data =
+        rkyv::to_bytes::<_, 256>(&withdrawal_id).expect("Failed to serialize WithdrawalId");
 
     // Decode using the data-driver
     // This should use the feed_type "WithdrawalId", NOT return null
@@ -551,11 +594,11 @@ use std::sync::LazyLock;
 use dusk_core::abi::ContractId;
 use dusk_core::dusk;
 use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as AccountSecretKey};
-use types::{Deposit, EVMAddress};
-use types::Address as DSAddress;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use test_session::TestSession;
+use types::Address as DSAddress;
+use types::{Deposit, EVMAddress};
 
 const TEST_BRIDGE_BYTECODE: &[u8] =
     include_bytes!("../../../target/contract/wasm32-unknown-unknown/release/test_bridge.wasm");
@@ -567,8 +610,7 @@ static OWNER_SK: LazyLock<AccountSecretKey> = LazyLock::new(|| {
     let mut rng = StdRng::seed_from_u64(0x5EAF00D);
     AccountSecretKey::random(&mut rng)
 });
-static OWNER_PK: LazyLock<AccountPublicKey> =
-    LazyLock::new(|| AccountPublicKey::from(&*OWNER_SK));
+static OWNER_PK: LazyLock<AccountPublicKey> = LazyLock::new(|| AccountPublicKey::from(&*OWNER_SK));
 static OWNER_ADDRESS: LazyLock<DSAddress> = LazyLock::new(|| DSAddress::from(*OWNER_PK));
 
 /// Set up a contract session for event tests.
@@ -731,7 +773,9 @@ fn test_schema_function_input_output_types() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let functions = schema["functions"]
+        .as_array()
+        .expect("functions should be an array");
 
     // Test is_paused: no input, returns bool
     let is_paused = functions
@@ -739,7 +783,10 @@ fn test_schema_function_input_output_types() {
         .find(|f| f["name"] == "is_paused")
         .expect("is_paused should exist");
     assert_eq!(is_paused["input"], "()", "is_paused input should be ()");
-    assert_eq!(is_paused["output"], "bool", "is_paused output should be bool");
+    assert_eq!(
+        is_paused["output"], "bool",
+        "is_paused output should be bool"
+    );
 
     // Test init: takes DSAddress, returns ()
     let init = functions
@@ -758,8 +805,14 @@ fn test_schema_function_input_output_types() {
         .iter()
         .find(|f| f["name"] == "finalization_period")
         .expect("finalization_period should exist");
-    assert_eq!(fin_period["input"], "()", "finalization_period input should be ()");
-    assert_eq!(fin_period["output"], "u64", "finalization_period output should be u64");
+    assert_eq!(
+        fin_period["input"], "()",
+        "finalization_period input should be ()"
+    );
+    assert_eq!(
+        fin_period["output"], "u64",
+        "finalization_period output should be u64"
+    );
 
     // Test deposit: takes Deposit type, returns ()
     let deposit = functions
@@ -796,7 +849,9 @@ fn test_schema_function_with_multiple_params() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let functions = schema["functions"]
+        .as_array()
+        .expect("functions should be an array");
 
     // Test initiate_transfer: takes (EVMAddress, DSAddress, u64)
     let transfer = functions
@@ -822,7 +877,9 @@ fn test_schema_doc_comments() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let functions = schema["functions"]
+        .as_array()
+        .expect("functions should be an array");
 
     // is_paused has doc comment "Returns whether the bridge is paused."
     let is_paused = functions
@@ -864,7 +921,9 @@ fn test_schema_event_details() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let events = schema["events"].as_array().expect("events should be an array");
+    let events = schema["events"]
+        .as_array()
+        .expect("events should be an array");
 
     // Find BridgeInitiated event and verify data type
     let bridge_initiated = events
@@ -907,7 +966,9 @@ fn test_schema_import_paths() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let imports = schema["imports"].as_array().expect("imports should be an array");
+    let imports = schema["imports"]
+        .as_array()
+        .expect("imports should be an array");
 
     // Verify Deposit import has full path
     let deposit_import = imports
@@ -952,17 +1013,16 @@ fn test_schema_custom_flag() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let functions = schema["functions"]
+        .as_array()
+        .expect("functions should be an array");
 
     // Regular functions should have custom = false
     let is_paused = functions
         .iter()
         .find(|f| f["name"] == "is_paused")
         .expect("is_paused should exist");
-    assert_eq!(
-        is_paused["custom"], false,
-        "is_paused should not be custom"
-    );
+    assert_eq!(is_paused["custom"], false, "is_paused should not be custom");
 
     let pause = functions
         .iter()
@@ -977,7 +1037,9 @@ fn test_schema_nested_generic_types() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let functions = schema["functions"]
+        .as_array()
+        .expect("functions should be an array");
 
     // Test pending_withdrawal_with_id which returns Option<(WithdrawalId, PendingWithdrawal)>
     let fn_with_nested = functions
@@ -1024,41 +1086,109 @@ fn test_schema_multiple_impl_blocks() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let functions = schema["functions"]
+        .as_array()
+        .expect("functions should be an array");
     let fn_names: Vec<&str> = functions
         .iter()
         .map(|f| f["name"].as_str().unwrap())
         .collect();
 
     // Functions from the FIRST impl block (new is const fn, not exported)
-    assert!(fn_names.contains(&"init"), "missing init from first impl block");
-    assert!(fn_names.contains(&"is_paused"), "missing is_paused from first impl block");
-    assert!(fn_names.contains(&"pause"), "missing pause from first impl block");
-    assert!(fn_names.contains(&"unpause"), "missing unpause from first impl block");
-    assert!(fn_names.contains(&"finalization_period"), "missing finalization_period from first impl block");
-    assert!(fn_names.contains(&"set_u64"), "missing set_u64 from first impl block");
-    assert!(fn_names.contains(&"set_evm_address_or_offset"), "missing set_evm_address_or_offset from first impl block");
-    assert!(fn_names.contains(&"other_bridge"), "missing other_bridge from first impl block");
+    assert!(
+        fn_names.contains(&"init"),
+        "missing init from first impl block"
+    );
+    assert!(
+        fn_names.contains(&"is_paused"),
+        "missing is_paused from first impl block"
+    );
+    assert!(
+        fn_names.contains(&"pause"),
+        "missing pause from first impl block"
+    );
+    assert!(
+        fn_names.contains(&"unpause"),
+        "missing unpause from first impl block"
+    );
+    assert!(
+        fn_names.contains(&"finalization_period"),
+        "missing finalization_period from first impl block"
+    );
+    assert!(
+        fn_names.contains(&"set_u64"),
+        "missing set_u64 from first impl block"
+    );
+    assert!(
+        fn_names.contains(&"set_evm_address_or_offset"),
+        "missing set_evm_address_or_offset from first impl block"
+    );
+    assert!(
+        fn_names.contains(&"other_bridge"),
+        "missing other_bridge from first impl block"
+    );
 
     // Functions from the SECOND impl block
-    assert!(fn_names.contains(&"deposit"), "missing deposit from second impl block");
-    assert!(fn_names.contains(&"pending_withdrawal"), "missing pending_withdrawal from second impl block");
-    assert!(fn_names.contains(&"other_bridge_ref"), "missing other_bridge_ref from second impl block");
-    assert!(fn_names.contains(&"verify_withdrawal"), "missing verify_withdrawal from second impl block");
-    assert!(fn_names.contains(&"initiate_transfer"), "missing initiate_transfer from second impl block");
-    assert!(fn_names.contains(&"add_pending_withdrawal"), "missing add_pending_withdrawal from second impl block");
-    assert!(fn_names.contains(&"finalize_withdrawal"), "missing finalize_withdrawal from second impl block");
-    assert!(fn_names.contains(&"pending_withdrawals"), "missing pending_withdrawals from second impl block");
-    assert!(fn_names.contains(&"pending_withdrawal_ids"), "missing pending_withdrawal_ids from second impl block");
+    assert!(
+        fn_names.contains(&"deposit"),
+        "missing deposit from second impl block"
+    );
+    assert!(
+        fn_names.contains(&"pending_withdrawal"),
+        "missing pending_withdrawal from second impl block"
+    );
+    assert!(
+        fn_names.contains(&"other_bridge_ref"),
+        "missing other_bridge_ref from second impl block"
+    );
+    assert!(
+        fn_names.contains(&"verify_withdrawal"),
+        "missing verify_withdrawal from second impl block"
+    );
+    assert!(
+        fn_names.contains(&"initiate_transfer"),
+        "missing initiate_transfer from second impl block"
+    );
+    assert!(
+        fn_names.contains(&"add_pending_withdrawal"),
+        "missing add_pending_withdrawal from second impl block"
+    );
+    assert!(
+        fn_names.contains(&"finalize_withdrawal"),
+        "missing finalize_withdrawal from second impl block"
+    );
+    assert!(
+        fn_names.contains(&"pending_withdrawals"),
+        "missing pending_withdrawals from second impl block"
+    );
+    assert!(
+        fn_names.contains(&"pending_withdrawal_ids"),
+        "missing pending_withdrawal_ids from second impl block"
+    );
 
     // Verify OwnableUpgradeable trait methods are present
-    assert!(fn_names.contains(&"owner"), "missing owner from OwnableUpgradeable trait impl");
-    assert!(fn_names.contains(&"transfer_ownership"), "missing transfer_ownership from OwnableUpgradeable trait impl");
-    assert!(fn_names.contains(&"renounce_ownership"), "missing renounce_ownership from OwnableUpgradeable trait impl");
+    assert!(
+        fn_names.contains(&"owner"),
+        "missing owner from OwnableUpgradeable trait impl"
+    );
+    assert!(
+        fn_names.contains(&"transfer_ownership"),
+        "missing transfer_ownership from OwnableUpgradeable trait impl"
+    );
+    assert!(
+        fn_names.contains(&"renounce_ownership"),
+        "missing renounce_ownership from OwnableUpgradeable trait impl"
+    );
 
     // Verify Pausable trait methods are present (second trait implementation)
-    assert!(fn_names.contains(&"paused"), "missing paused from Pausable trait impl");
-    assert!(fn_names.contains(&"toggle_pause"), "missing toggle_pause from Pausable trait impl");
+    assert!(
+        fn_names.contains(&"paused"),
+        "missing paused from Pausable trait impl"
+    );
+    assert!(
+        fn_names.contains(&"toggle_pause"),
+        "missing toggle_pause from Pausable trait impl"
+    );
 }
 
 // =============================================================================
@@ -1074,7 +1204,11 @@ fn test_schema_is_valid_json() {
 
     // Verify it parses as valid JSON
     let result: Result<serde_json::Value, _> = serde_json::from_str(&schema_json);
-    assert!(result.is_ok(), "Schema should be valid JSON: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Schema should be valid JSON: {:?}",
+        result.err()
+    );
 
     // Verify it's a JSON object (not array, string, etc.)
     let schema = result.unwrap();
@@ -1091,13 +1225,25 @@ fn test_schema_has_required_top_level_fields() {
 
     // Required top-level fields
     assert!(obj.contains_key("name"), "Schema must have 'name' field");
-    assert!(obj.contains_key("functions"), "Schema must have 'functions' field");
-    assert!(obj.contains_key("events"), "Schema must have 'events' field");
-    assert!(obj.contains_key("imports"), "Schema must have 'imports' field");
+    assert!(
+        obj.contains_key("functions"),
+        "Schema must have 'functions' field"
+    );
+    assert!(
+        obj.contains_key("events"),
+        "Schema must have 'events' field"
+    );
+    assert!(
+        obj.contains_key("imports"),
+        "Schema must have 'imports' field"
+    );
 
     // Verify types of top-level fields
     assert!(schema["name"].is_string(), "'name' must be a string");
-    assert!(schema["functions"].is_array(), "'functions' must be an array");
+    assert!(
+        schema["functions"].is_array(),
+        "'functions' must be an array"
+    );
     assert!(schema["events"].is_array(), "'events' must be an array");
     assert!(schema["imports"].is_array(), "'imports' must be an array");
 }
@@ -1108,10 +1254,13 @@ fn test_schema_function_fields_consistent() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let functions = schema["functions"]
+        .as_array()
+        .expect("functions should be an array");
 
     for (i, func) in functions.iter().enumerate() {
-        let func_obj = func.as_object()
+        let func_obj = func
+            .as_object()
             .unwrap_or_else(|| panic!("Function at index {i} should be an object"));
 
         // Required fields for every function
@@ -1173,10 +1322,13 @@ fn test_schema_event_fields_consistent() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let events = schema["events"].as_array().expect("events should be an array");
+    let events = schema["events"]
+        .as_array()
+        .expect("events should be an array");
 
     for (i, event) in events.iter().enumerate() {
-        let event_obj = event.as_object()
+        let event_obj = event
+            .as_object()
             .unwrap_or_else(|| panic!("Event at index {i} should be an object"));
 
         // Required fields for every event
@@ -1217,10 +1369,13 @@ fn test_schema_import_fields_consistent() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let imports = schema["imports"].as_array().expect("imports should be an array");
+    let imports = schema["imports"]
+        .as_array()
+        .expect("imports should be an array");
 
     for (i, import) in imports.iter().enumerate() {
-        let import_obj = import.as_object()
+        let import_obj = import
+            .as_object()
             .unwrap_or_else(|| panic!("Import at index {i} should be an object"));
 
         // Required fields for every import
@@ -1268,7 +1423,9 @@ fn test_schema_no_duplicate_function_names() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let functions = schema["functions"].as_array().expect("functions should be an array");
+    let functions = schema["functions"]
+        .as_array()
+        .expect("functions should be an array");
     let fn_names: Vec<&str> = functions
         .iter()
         .map(|f| f["name"].as_str().unwrap())
@@ -1290,7 +1447,9 @@ fn test_schema_no_duplicate_event_topics() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let events = schema["events"].as_array().expect("events should be an array");
+    let events = schema["events"]
+        .as_array()
+        .expect("events should be an array");
     let topics: Vec<&str> = events
         .iter()
         .map(|e| e["topic"].as_str().unwrap())
