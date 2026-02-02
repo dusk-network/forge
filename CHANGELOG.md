@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove external path dependencies from test-bridge (evm-core, tests-setup)
 - Add local `types` crate with bridge types for self-contained testing
 
+### Added
+
+- Add feature-gate compile_error to the contract macro [#3]
+- Add compile_error for mutually exclusive contract/data-driver features
+
 ### Removed
 
 - Remove `Cargo.lock` from version control
@@ -46,7 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add contract macro for #[no_mangle] scaffolding
 
 <!-- Issues -->
+[#3]: https://github.com/dusk-network/forge/issues/3
 
+<!-- Releases -->
 [Unreleased]: https://github.com/dusk-network/forge/compare/v0.2.1...HEAD
 [0.2.1]: https://github.com/dusk-network/forge/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/dusk-network/forge/releases/tag/v0.2.0

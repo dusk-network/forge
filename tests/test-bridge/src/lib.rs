@@ -19,10 +19,6 @@
 #![deny(missing_docs)]
 #![deny(clippy::pedantic)]
 
-// Require explicit feature selection for WASM builds
-#[cfg(not(any(feature = "contract", feature = "data-driver")))]
-compile_error!("Enable either 'contract' or 'data-driver' feature for WASM builds");
-
 /// Test bridge contract demonstrating macro features.
 #[dusk_forge::contract]
 mod test_bridge {

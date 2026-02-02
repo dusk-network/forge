@@ -1,0 +1,7 @@
+error: Enable either 'contract' or 'data-driver' feature for WASM builds
+ --> tests/compile-fail/../common/contract.rs
+  |
+  | #[contract]
+  | ^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `contract` (in Nightly builds, run with -Z macro-backtrace for more info)
