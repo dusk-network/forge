@@ -49,6 +49,15 @@ mod test_bridge {
         fn toggle_pause(&mut self) -> bool;
     }
 
+    /// Trait implementation for an empty trait impl that still exposes functionality
+    pub trait ISemver {
+        /// Return the current contract version.
+        #[must_use]
+        fn version() -> String {
+            env!("CARGO_PKG_VERSION").into()
+        }
+    }
+
     /// Test bridge contract state.
     ///
     /// Minimal contract struct that mirrors StandardBridge fields
@@ -327,6 +336,14 @@ mod test_bridge {
         /// Renounces ownership of the contract.
         /// Empty body signals the macro to use the trait's default implementation.
         fn renounce_ownership(&mut self) {}
+    }
+
+    /// `ISemver` trait implementation
+    ///
+    /// Demonstrates an empty trait impelementation that exposes a function.
+    #[contract(expose = [version])]
+    impl ISemver for TestBridge {
+        fn version() -> alloc::string::String {}
     }
 
     /// `Pausable` trait implementation.
