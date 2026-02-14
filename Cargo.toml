@@ -54,6 +54,7 @@ predicates = "3"
 tempfile = "=3.10.1"
 thiserror = "2"
 toml = "0.8"
+wasmtime = "25"
 
 # Pin to match L1Contracts versions
 dusk-vm = { version = "=1.4.0", default-features = false }

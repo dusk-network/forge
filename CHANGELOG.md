@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add the `dusk-forge` CLI with `new`, `build`, `test`, and `check` commands for contract project scaffolding and workflows.
 - Add `expand`, `clean`, and `completions` commands to the `dusk-forge` CLI.
+- Add `schema`, `call`, and `verify` commands to the `dusk-forge` CLI.
 
 ### Changed
 

@@ -44,6 +44,9 @@ cargo run -p dusk-forge-cli -- --help
 - `dusk-forge check`: validate project structure and toolchain.
 - `dusk-forge expand [--data-driver]`: show macro expansion with `cargo-expand`.
 - `dusk-forge clean`: remove `target/contract` and `target/data-driver`.
+- `dusk-forge schema [--pretty]`: build data-driver WASM and print `CONTRACT_SCHEMA` JSON.
+- `dusk-forge call <function> [--input <json>]`: encode call bytes using the data-driver export `encode_input_fn`.
+- `dusk-forge verify [--expected-blake3 <hash>] [--skip-build]`: validate artifacts, schema loading, and optional contract hash match.
 - `dusk-forge completions <shell>`: generate shell completions.
 
 ## Common Options
@@ -65,6 +68,24 @@ dusk-forge check
 dusk-forge build
 dusk-forge build contract
 dusk-forge test
+```
+
+Print schema JSON:
+
+```bash
+dusk-forge schema --pretty
+```
+
+Encode input bytes for a function call:
+
+```bash
+dusk-forge call set_count --input '42'
+```
+
+Verify artifacts and hash:
+
+```bash
+dusk-forge verify --expected-blake3 <hash>
 ```
 
 ## Toolchain Requirements
@@ -100,4 +121,4 @@ Scaffolded projects include:
 - `rust-toolchain.toml` for deterministic toolchain selection
 - `Cargo.lock` generated at scaffold time
 
-Build/test commands run Cargo with `--locked`.
+Build/test/schema commands run Cargo with `--locked`.

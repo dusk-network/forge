@@ -35,4 +35,11 @@ pub enum CliError {
 
     #[error("TOML parse error: {0}")]
     Toml(#[from] toml::de::Error),
+
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+
+    #[cfg(feature = "schema")]
+    #[error("wasm runtime error: {0}")]
+    Wasm(#[from] wasmtime::Error),
 }
