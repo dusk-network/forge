@@ -54,6 +54,12 @@ pub enum Commands {
     Expand(ExpandArgs),
     /// Remove contract-specific build artifact directories.
     Clean(ProjectOptions),
+    /// Build data-driver WASM and print CONTRACT_SCHEMA as JSON.
+    Schema(SchemaArgs),
+    /// Encode call input bytes through the data-driver.
+    Call(CallArgs),
+    /// Verify contract and data-driver artifacts.
+    Verify(VerifyArgs),
     /// Generate shell completion scripts.
     Completions(CompletionsArgs),
 }
@@ -125,6 +131,43 @@ pub struct ExpandArgs {
     /// Expand with the data-driver feature.
     #[arg(long)]
     pub data_driver: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct SchemaArgs {
+    #[command(flatten)]
+    pub project: ProjectOptions,
+
+    /// Pretty-print JSON output.
+    #[arg(long)]
+    pub pretty: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct CallArgs {
+    #[command(flatten)]
+    pub project: ProjectOptions,
+
+    /// Contract function name to encode.
+    pub function: String,
+
+    /// JSON input payload for the function (use `null` for no input).
+    #[arg(long, default_value = "null")]
+    pub input: String,
+}
+
+#[derive(Debug, Args)]
+pub struct VerifyArgs {
+    #[command(flatten)]
+    pub project: ProjectOptions,
+
+    /// Optional expected BLAKE3 hash of the contract WASM.
+    #[arg(long)]
+    pub expected_blake3: Option<String>,
+
+    /// Skip rebuilding artifacts and verify existing files only.
+    #[arg(long)]
+    pub skip_build: bool,
 }
 
 #[derive(Debug, Args)]

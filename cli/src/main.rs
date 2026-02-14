@@ -1,6 +1,7 @@
 mod build_runner;
 mod cli;
 mod commands;
+mod data_driver_wasm;
 mod error;
 mod project;
 mod template;
@@ -29,6 +30,9 @@ fn run() -> Result<()> {
         Commands::Check(args) => commands::check::run(args),
         Commands::Expand(args) => commands::expand::run(args),
         Commands::Clean(args) => commands::clean::run(args),
+        Commands::Schema(args) => commands::schema::run(args),
+        Commands::Call(args) => commands::call::run(args),
+        Commands::Verify(args) => commands::verify::run(args),
         Commands::Completions(args) => commands::completions::run(args),
     }
 }

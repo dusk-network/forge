@@ -50,10 +50,12 @@ cargo_metadata = "0.19"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 colored = "3"
+indexmap = "=2.11.4"
 predicates = "3"
 tempfile = "=3.10.1"
 thiserror = "2"
 toml = "0.8"
+wasmtime = "25"
 
 # Pin to match L1Contracts versions
 dusk-vm = { version = "=1.4.0", default-features = false }
