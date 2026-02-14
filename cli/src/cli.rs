@@ -54,6 +54,12 @@ pub enum Commands {
     Expand(ExpandArgs),
     /// Remove contract-specific build artifact directories.
     Clean(ProjectOptions),
+    /// Build data-driver WASM and print CONTRACT_SCHEMA as JSON.
+    Schema(SchemaArgs),
+    /// Encode call input bytes through the data-driver.
+    Call(CallArgs),
+    /// Verify contract and data-driver artifacts.
+    Verify(VerifyArgs),
     /// Generate shell completion scripts.
     Completions(CompletionsArgs),
 }
@@ -128,6 +134,43 @@ pub struct ExpandArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct SchemaArgs {
+    #[command(flatten)]
+    pub project: ProjectOptions,
+
+    /// Pretty-print JSON output.
+    #[arg(long)]
+    pub pretty: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct CallArgs {
+    #[command(flatten)]
+    pub project: ProjectOptions,
+
+    /// Contract function name to encode.
+    pub function: String,
+
+    /// JSON input payload for the function (use `null` for no input).
+    #[arg(long, default_value = "null")]
+    pub input: String,
+}
+
+#[derive(Debug, Args)]
+pub struct VerifyArgs {
+    #[command(flatten)]
+    pub project: ProjectOptions,
+
+    /// Optional expected BLAKE3 hash of the contract WASM.
+    #[arg(long)]
+    pub expected_blake3: Option<String>,
+
+    /// Skip rebuilding artifacts and verify existing files only.
+    #[arg(long)]
+    pub skip_build: bool,
+}
+
+#[derive(Debug, Args)]
 pub struct CompletionsArgs {
     /// Shell to generate completions for.
     #[arg(value_enum)]
@@ -169,6 +212,48 @@ mod tests {
         match cli.command {
             Commands::Completions(_) => {}
             other => panic!("expected completions command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_schema_command() {
+        let cli = Cli::parse_from(["dusk-forge", "schema", "--pretty"]);
+
+        match cli.command {
+            Commands::Schema(args) => assert!(args.pretty),
+            other => panic!("expected schema command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_call_command() {
+        let cli = Cli::parse_from(["dusk-forge", "call", "transfer", "--input", "{\"foo\":1}"]);
+
+        match cli.command {
+            Commands::Call(args) => {
+                assert_eq!(args.function, "transfer");
+                assert_eq!(args.input, "{\"foo\":1}");
+            }
+            other => panic!("expected call command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_verify_command() {
+        let cli = Cli::parse_from([
+            "dusk-forge",
+            "verify",
+            "--expected-blake3",
+            "deadbeef",
+            "--skip-build",
+        ]);
+
+        match cli.command {
+            Commands::Verify(args) => {
+                assert_eq!(args.expected_blake3.as_deref(), Some("deadbeef"));
+                assert!(args.skip_build);
+            }
+            other => panic!("expected verify command, got {other:?}"),
         }
     }
 }
