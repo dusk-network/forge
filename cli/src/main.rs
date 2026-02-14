@@ -27,5 +27,8 @@ fn run() -> Result<()> {
         Commands::Build(args) => commands::build::run(args),
         Commands::Test(args) => commands::test::run(args),
         Commands::Check(args) => commands::check::run(args),
+        Commands::Expand(args) => commands::expand::run(args),
+        Commands::Clean(args) => commands::clean::run(args),
+        Commands::Completions(args) => commands::completions::run(args),
     }
 }

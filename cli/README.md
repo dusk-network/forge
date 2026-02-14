@@ -42,6 +42,9 @@ cargo run -p dusk-forge-cli -- --help
 - `dusk-forge build [target]`: build WASM artifacts. Targets: `all` (default), `contract`, `data-driver`.
 - `dusk-forge test [-- <cargo-test-args>]`: build contract WASM and run `cargo test --release`.
 - `dusk-forge check`: validate project structure and toolchain.
+- `dusk-forge expand [--data-driver]`: show macro expansion with `cargo-expand`.
+- `dusk-forge clean`: remove `target/contract` and `target/data-driver`.
+- `dusk-forge completions <shell>`: generate shell completions.
 
 ## Common Options
 
@@ -81,6 +84,7 @@ Data-driver builds require:
 Optional tools:
 
 - `wasm-opt` for smaller WASM artifacts
+- `cargo-expand` for the `expand` command
 
 ## Template Notes
 

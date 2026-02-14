@@ -18,6 +18,12 @@ pub enum CliError {
     #[error("expected a Dusk Forge contract project at {0}")]
     NotAForgeProject(PathBuf),
 
+    #[error("required tool not found: {tool}. {hint}")]
+    MissingTool {
+        tool: &'static str,
+        hint: &'static str,
+    },
+
     #[error("command failed: {program} (exit code {code})")]
     CommandFailed { program: String, code: i32 },
 
