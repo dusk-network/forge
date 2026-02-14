@@ -48,6 +48,7 @@ syn = { version = "2", features = ["full", "visit"] }
 assert_cmd = "2"
 cargo_metadata = "0.19"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 colored = "3"
 predicates = "3"
 tempfile = "=3.10.1"
