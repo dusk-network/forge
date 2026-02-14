@@ -4,8 +4,6 @@
 //
 // Copyright (c) DUSK NETWORK. All rights reserved.
 
-#![feature(let_chains)]
-
 //! Procedural macro for the `#[contract]` attribute.
 //!
 //! This macro is applied to a module containing a contract struct and its
@@ -348,15 +346,22 @@ fn extract_doc_comment(attrs: &[Attribute]) -> Option<String> {
     let docs: Vec<String> = attrs
         .iter()
         .filter_map(|attr| {
-            if attr.path().is_ident("doc")
-                && let syn::Meta::NameValue(meta) = &attr.meta
-                && let Expr::Lit(ExprLit {
-                    lit: Lit::Str(s), ..
-                }) = &meta.value
-            {
-                return Some(s.value().trim().to_string());
+            if !attr.path().is_ident("doc") {
+                return None;
             }
-            None
+
+            let syn::Meta::NameValue(meta) = &attr.meta else {
+                return None;
+            };
+
+            let Expr::Lit(ExprLit {
+                lit: Lit::Str(s), ..
+            }) = &meta.value
+            else {
+                return None;
+            };
+
+            Some(s.value().trim().to_string())
         })
         .collect();
 
@@ -551,15 +556,15 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         // Filter out custom data-driver handler functions (they go in the data_driver module)
         .filter(|item| !extract::is_custom_handler(item))
         .map(|item| {
-            if let Item::Impl(impl_block) = item
-                && let Type::Path(type_path) = &*impl_block.self_ty
-                && type_path.path.is_ident(&contract_name)
-            {
-                // Strip #[contract(...)] attributes from both inherent and trait impl blocks
-                Item::Impl(generate::strip_contract_attributes(impl_block.clone()))
-            } else {
-                item.clone()
+            if let Item::Impl(impl_block) = item {
+                if let Type::Path(type_path) = &*impl_block.self_ty {
+                    if type_path.path.is_ident(&contract_name) {
+                        // Strip #[contract(...)] attributes from both inherent and trait impl blocks
+                        return Item::Impl(generate::strip_contract_attributes(impl_block.clone()));
+                    }
+                }
             }
+            item.clone()
         })
         .collect();
 

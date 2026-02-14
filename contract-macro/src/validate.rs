@@ -42,30 +42,30 @@ pub(crate) fn public_method(method: &ImplItemFn) -> Result<(), syn::Error> {
 
     // Check for impl Trait in parameters
     for arg in &method.sig.inputs {
-        if let FnArg::Typed(pat_type) = arg
-            && let Type::ImplTrait(_) = &*pat_type.ty
-        {
-            return Err(syn::Error::new_spanned(
-                &pat_type.ty,
-                format!(
-                    "public method `{name}` cannot use `impl Trait` in parameters; \
-                     extern \"C\" wrappers require concrete types"
-                ),
-            ));
+        if let FnArg::Typed(pat_type) = arg {
+            if let Type::ImplTrait(_) = &*pat_type.ty {
+                return Err(syn::Error::new_spanned(
+                    &pat_type.ty,
+                    format!(
+                        "public method `{name}` cannot use `impl Trait` in parameters; \
+                         extern \"C\" wrappers require concrete types"
+                    ),
+                ));
+            }
         }
     }
 
     // Check for impl Trait in return type
-    if let ReturnType::Type(_, ty) = &method.sig.output
-        && let Type::ImplTrait(_) = &**ty
-    {
-        return Err(syn::Error::new_spanned(
-            ty,
-            format!(
-                "public method `{name}` cannot use `impl Trait` as return type; \
-                 extern \"C\" wrappers require concrete types"
-            ),
-        ));
+    if let ReturnType::Type(_, ty) = &method.sig.output {
+        if let Type::ImplTrait(_) = &**ty {
+            return Err(syn::Error::new_spanned(
+                ty,
+                format!(
+                    "public method `{name}` cannot use `impl Trait` as return type; \
+                     extern \"C\" wrappers require concrete types"
+                ),
+            ));
+        }
     }
 
     // Check for self receiver: if present, must be borrowed (not consumed)
@@ -91,11 +91,10 @@ pub(crate) fn public_method(method: &ImplItemFn) -> Result<(), syn::Error> {
 /// exported as an extern function.
 pub(crate) fn impl_block_methods(impl_block: &ItemImpl) -> Result<(), syn::Error> {
     for item in &impl_block.items {
-        if let ImplItem::Fn(method) = item
-            && matches!(method.vis, Visibility::Public(_))
-            && method.sig.ident != "new"
-        {
-            public_method(method)?;
+        if let ImplItem::Fn(method) = item {
+            if matches!(method.vis, Visibility::Public(_)) && method.sig.ident != "new" {
+                public_method(method)?;
+            }
         }
     }
     Ok(())
@@ -117,10 +116,12 @@ pub(crate) fn new_constructor(
     // Find the `new` method in any impl block
     let new_method = impl_blocks.iter().find_map(|impl_block| {
         impl_block.items.iter().find_map(|item| {
-            if let ImplItem::Fn(method) = item
-                && method.sig.ident == "new"
-            {
-                Some(method)
+            if let ImplItem::Fn(method) = item {
+                if method.sig.ident == "new" {
+                    Some(method)
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -194,10 +195,12 @@ pub(crate) fn init_method(
     // Find the `init` method in any impl block
     let init_method = impl_blocks.iter().find_map(|impl_block| {
         impl_block.items.iter().find_map(|item| {
-            if let ImplItem::Fn(method) = item
-                && method.sig.ident == "init"
-            {
-                Some(method)
+            if let ImplItem::Fn(method) = item {
+                if method.sig.ident == "init" {
+                    Some(method)
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -299,30 +302,30 @@ pub(crate) fn trait_method(
 
     // Check for impl Trait in parameters
     for arg in &method.sig.inputs {
-        if let FnArg::Typed(pat_type) = arg
-            && let Type::ImplTrait(_) = &*pat_type.ty
-        {
-            return Err(syn::Error::new_spanned(
-                &pat_type.ty,
-                format!(
-                    "trait method `{trait_name}::{name}` cannot use `impl Trait` in parameters; \
-                     extern \"C\" wrappers require concrete types"
-                ),
-            ));
+        if let FnArg::Typed(pat_type) = arg {
+            if let Type::ImplTrait(_) = &*pat_type.ty {
+                return Err(syn::Error::new_spanned(
+                    &pat_type.ty,
+                    format!(
+                        "trait method `{trait_name}::{name}` cannot use `impl Trait` in parameters; \
+                         extern \"C\" wrappers require concrete types"
+                    ),
+                ));
+            }
         }
     }
 
     // Check for impl Trait in return type
-    if let ReturnType::Type(_, ty) = &method.sig.output
-        && let Type::ImplTrait(_) = &**ty
-    {
-        return Err(syn::Error::new_spanned(
-            ty,
-            format!(
-                "trait method `{trait_name}::{name}` cannot use `impl Trait` as return type; \
-                 extern \"C\" wrappers require concrete types"
-            ),
-        ));
+    if let ReturnType::Type(_, ty) = &method.sig.output {
+        if let Type::ImplTrait(_) = &**ty {
+            return Err(syn::Error::new_spanned(
+                ty,
+                format!(
+                    "trait method `{trait_name}::{name}` cannot use `impl Trait` as return type; \
+                     extern \"C\" wrappers require concrete types"
+                ),
+            ));
+        }
     }
 
     // Check for self receiver

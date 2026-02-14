@@ -52,7 +52,7 @@ fn validate_feeds(
         ));
     }
 
-    if let Some(ref ft) = feed_type {
+    if let Some(ft) = feed_type {
         // Has feeds attribute - validate it matches the expressions
         if let Some(mismatch_msg) = validate_feed_type_match(&ft.to_string(), &feed_exprs) {
             return Err(syn::Error::new_spanned(&method.sig, mismatch_msg));
@@ -472,13 +472,12 @@ fn contract_struct<'a>(
     let pub_structs: Vec<_> = items
         .iter()
         .filter_map(|item| {
-            if let Item::Struct(s) = item
-                && matches!(s.vis, Visibility::Public(_))
-            {
-                Some(s)
-            } else {
-                None
+            if let Item::Struct(s) = item {
+                if matches!(s.vis, Visibility::Public(_)) {
+                    return Some(s);
+                }
             }
+            None
         })
         .collect();
 
@@ -507,15 +506,17 @@ fn impl_blocks<'a>(items: &'a [Item], contract_name: &str) -> Vec<&'a ItemImpl> 
     items
         .iter()
         .filter_map(|item| {
-            if let Item::Impl(impl_block) = item
-                && impl_block.trait_.is_none()
-                && let Type::Path(type_path) = &*impl_block.self_ty
-                && type_path.path.is_ident(contract_name)
-            {
-                Some(impl_block)
-            } else {
-                None
+            if let Item::Impl(impl_block) = item {
+                if impl_block.trait_.is_some() {
+                    return None;
+                }
+                if let Type::Path(type_path) = &*impl_block.self_ty {
+                    if type_path.path.is_ident(contract_name) {
+                        return Some(impl_block);
+                    }
+                }
             }
+            None
         })
         .collect()
 }
@@ -528,26 +529,33 @@ fn trait_impls<'a>(items: &'a [Item], contract_name: &str) -> Vec<TraitImplInfo<
     items
         .iter()
         .filter_map(|item| {
-            if let Item::Impl(impl_block) = item
-                && let Some((_, trait_path, _)) = &impl_block.trait_
-                && let Type::Path(type_path) = &*impl_block.self_ty
-                && type_path.path.is_ident(contract_name)
-                && let Some(list) = expose_list(&impl_block.attrs)
-            {
+            if let Item::Impl(impl_block) = item {
+                let Some((_, trait_path, _)) = &impl_block.trait_ else {
+                    return None;
+                };
+                let Type::Path(type_path) = &*impl_block.self_ty else {
+                    return None;
+                };
+                if !type_path.path.is_ident(contract_name) {
+                    return None;
+                }
+                let Some(list) = expose_list(&impl_block.attrs) else {
+                    return None;
+                };
+
                 let trait_name = trait_path
                     .segments
                     .iter()
                     .map(|s| s.ident.to_string())
                     .collect::<Vec<_>>()
                     .join("::");
-                Some(TraitImplInfo {
+                return Some(TraitImplInfo {
                     trait_name,
                     impl_block,
                     expose_list: list,
-                })
-            } else {
-                None
+                });
             }
+            None
         })
         .collect()
 }
