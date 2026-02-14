@@ -25,18 +25,9 @@ mod counter {
         value: u64,
     }
 
-    /// Event emitted when the counter changes.
-    #[derive(Debug)]
-    pub struct CountChanged {
-        /// Previous value.
-        pub old_value: u64,
-        /// New value.
-        pub new_value: u64,
-    }
-
     impl Counter {
         /// Initialize a new counter with zero.
-        pub fn new() -> Self {
+        pub const fn new() -> Self {
             Self { value: 0 }
         }
 
@@ -49,30 +40,21 @@ mod counter {
         pub fn increment(&mut self) {
             let old_value = self.value;
             self.value = self.value.saturating_add(1);
-            abi::emit("count_changed", CountChanged {
-                old_value,
-                new_value: self.value,
-            });
+            abi::emit("count_changed", (old_value, self.value));
         }
 
         /// Decrement the counter by one.
         pub fn decrement(&mut self) {
             let old_value = self.value;
             self.value = self.value.saturating_sub(1);
-            abi::emit("count_changed", CountChanged {
-                old_value,
-                new_value: self.value,
-            });
+            abi::emit("count_changed", (old_value, self.value));
         }
 
         /// Set the counter to a specific value.
         pub fn set_count(&mut self, value: u64) {
             let old_value = self.value;
             self.value = value;
-            abi::emit("count_changed", CountChanged {
-                old_value,
-                new_value: self.value,
-            });
+            abi::emit("count_changed", (old_value, self.value));
         }
     }
 }
