@@ -20,7 +20,7 @@ dusk-core = { workspace = true }
 
 [workspace]
 resolver = "2"
-members = ["contract-macro", "tests/types", "tests/test-bridge"]
+members = ["contract-macro", "tests/types", "tests/test-bridge", "cli"]
 exclude = ["contract-template"]
 
 [workspace.package]
@@ -45,6 +45,14 @@ serde_json = { version = "1", default-features = false }
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "visit"] }
+assert_cmd = "2"
+cargo_metadata = "0.19"
+clap = { version = "4", features = ["derive"] }
+colored = "3"
+predicates = "3"
+tempfile = "=3.10.1"
+thiserror = "2"
+toml = "0.8"
 
 # Pin to match L1Contracts versions
 dusk-vm = { version = "=1.4.0", default-features = false }
@@ -53,6 +61,7 @@ blake2b_simd = "=1.0.2"
 blake3 = "=1.5.4"
 constant_time_eq = "=0.3.1"
 time-core = "=0.1.6"
+uuid = "=1.20.0"
 
 # Enable overflow checks in release builds for contract safety
 [profile.release]

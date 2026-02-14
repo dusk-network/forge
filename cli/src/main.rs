@@ -1,0 +1,31 @@
+mod build_runner;
+mod cli;
+mod commands;
+mod error;
+mod project;
+mod template;
+mod toolchain;
+mod tools;
+mod ui;
+
+use clap::Parser;
+use cli::{Cli, Commands};
+use error::Result;
+
+fn main() {
+    if let Err(err) = run() {
+        ui::error(err.to_string());
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::New(args) => commands::new::run(args),
+        Commands::Build(args) => commands::build::run(args),
+        Commands::Test(args) => commands::test::run(args),
+        Commands::Check(args) => commands::check::run(args),
+    }
+}
