@@ -401,7 +401,9 @@ fn test_custom_data_driver_function_encode() {
     assert_eq!(encoded.len(), 20, "Expected 20 bytes for EVMAddress");
     assert_eq!(
         encoded,
-        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        vec![
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20
+        ]
     );
 }
 
@@ -594,8 +596,8 @@ use std::sync::LazyLock;
 use dusk_core::abi::ContractId;
 use dusk_core::dusk;
 use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as AccountSecretKey};
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use test_session::TestSession;
 use types::Address as DSAddress;
 use types::{Deposit, EVMAddress};

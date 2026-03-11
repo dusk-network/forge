@@ -13,8 +13,8 @@
 
 extern crate alloc;
 
-use std::sync::mpsc;
 use std::sync::LazyLock;
+use std::sync::mpsc;
 
 use dusk_core::abi::ContractId;
 use dusk_core::dusk;
@@ -29,8 +29,8 @@ use types::{
     EVMAddress, PendingWithdrawal, SetEVMAddressOrOffset, WithdrawalId, WithdrawalRequest,
 };
 
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 const DEPLOYER: [u8; 64] = [0u8; 64];
 
