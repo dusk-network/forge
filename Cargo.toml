@@ -45,7 +45,9 @@ serde_json = { version = "1", default-features = false }
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "visit"] }
-assert_cmd = "2"
+# Keep this on a pre-edition-2024 release until the workspace toolchain moves
+# forward; newer releases require a newer Cargo parser than this branch uses.
+assert_cmd = "=2.1.1"
 cargo_metadata = "0.19"
 clap = { version = "4", features = ["derive"] }
 colored = "3"

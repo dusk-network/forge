@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Make local forge path overrides opt-in for release builds and harden CLI template/path handling across platforms.
 
+### Fixed
+
+- Make `dusk-forge build data-driver` select the supported project feature (`data-driver-js` or `data-driver`) instead of hardcoding the JS variant.
+
 ## [0.2.2] - 2026-02-02
 
 ### Changed

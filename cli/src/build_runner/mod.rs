@@ -9,12 +9,12 @@ use std::{
 
 use crate::{
     error::{CliError, Result},
+    project::detect,
     project::metadata::ProjectMetadata,
     toolchain::{self, WASM_TARGET},
 };
 
 const CONTRACT_FEATURE: &str = "contract";
-const DATA_DRIVER_FEATURE: &str = "data-driver-js";
 const STACK_SIZE: u32 = 65_536;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +42,10 @@ impl BuildTarget {
 pub fn build(project: &ProjectMetadata, target: BuildTarget, verbose: bool) -> Result<PathBuf> {
     let mut cmd = Command::new("cargo");
     let toolchain_arg = toolchain::cargo_toolchain_arg(&project.project_dir)?;
+    let feature = match target {
+        BuildTarget::Contract => CONTRACT_FEATURE,
+        BuildTarget::DataDriver => detect::resolve_data_driver_feature(&project.project_dir)?,
+    };
 
     cmd.arg(&toolchain_arg)
         .arg("build")
@@ -50,10 +54,7 @@ pub fn build(project: &ProjectMetadata, target: BuildTarget, verbose: bool) -> R
         .arg("--target")
         .arg(WASM_TARGET)
         .arg("--features")
-        .arg(match target {
-            BuildTarget::Contract => CONTRACT_FEATURE,
-            BuildTarget::DataDriver => DATA_DRIVER_FEATURE,
-        })
+        .arg(feature)
         .arg("--manifest-path")
         .arg(&project.manifest_path)
         .arg("--color=always");
@@ -170,10 +171,10 @@ fn compose_rustflags(target: BuildTarget) -> String {
 
 fn home_dir_from_env() -> Option<String> {
     for key in ["HOME", "USERPROFILE"] {
-        if let Ok(value) = env::var(key)
-            && !value.is_empty()
-        {
-            return Some(value);
+        if let Ok(value) = env::var(key) {
+            if !value.is_empty() {
+                return Some(value);
+            }
         }
     }
 

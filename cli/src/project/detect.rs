@@ -42,6 +42,25 @@ pub fn load_manifest(project_dir: &Path) -> Result<Value> {
     Ok(content.parse::<Value>()?)
 }
 
+pub fn resolve_data_driver_feature(project_dir: &Path) -> Result<&'static str> {
+    let manifest = load_manifest(project_dir)?;
+    preferred_data_driver_feature(&manifest).ok_or_else(|| {
+        CliError::Message(
+            "project is missing a `data-driver` or `data-driver-js` feature".to_string(),
+        )
+    })
+}
+
+pub fn preferred_data_driver_feature(manifest: &Value) -> Option<&'static str> {
+    if has_feature(manifest, "data-driver-js") {
+        Some("data-driver-js")
+    } else if has_feature(manifest, "data-driver") {
+        Some("data-driver")
+    } else {
+        None
+    }
+}
+
 fn has_dusk_forge_dependency(manifest: &Value) -> bool {
     has_dependency(manifest.get("dependencies"), "dusk-forge")
         || manifest
@@ -80,4 +99,49 @@ fn has_release_overflow_checks(manifest: &Value) -> bool {
         .and_then(|release| release.get("overflow-checks"))
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preferred_data_driver_feature;
+
+    fn parse_manifest(source: &str) -> toml::Value {
+        source.parse().expect("valid manifest")
+    }
+
+    #[test]
+    fn resolves_preferred_data_driver_feature() {
+        let cases = [
+            (
+                "prefers data-driver-js when both features exist",
+                r#"
+                    [features]
+                    data-driver = []
+                    data-driver-js = ["data-driver"]
+                "#,
+                Some("data-driver-js"),
+            ),
+            (
+                "falls back to data-driver when js feature is missing",
+                r#"
+                    [features]
+                    data-driver = []
+                "#,
+                Some("data-driver"),
+            ),
+            (
+                "returns none when no data-driver feature exists",
+                r#"
+                    [features]
+                    contract = []
+                "#,
+                None,
+            ),
+        ];
+
+        for (name, source, expected) in cases {
+            let manifest = parse_manifest(source);
+            assert_eq!(preferred_data_driver_feature(&manifest), expected, "{name}");
+        }
+    }
 }
