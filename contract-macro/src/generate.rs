@@ -10,7 +10,7 @@ use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{ImplItem, ItemImpl};
 
-use crate::{generate_arg_expr, EventInfo, FunctionInfo, ImportInfo, Receiver};
+use crate::{EventInfo, FunctionInfo, ImportInfo, Receiver, generate_arg_expr};
 
 /// Generate the schema constant.
 pub(crate) fn schema(

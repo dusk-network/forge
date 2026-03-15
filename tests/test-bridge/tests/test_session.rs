@@ -12,7 +12,7 @@
 use std::sync::mpsc;
 
 use dusk_core::abi::{
-    ContractError, ContractId, Metadata, StandardBufSerializer, CONTRACT_ID_BYTES,
+    CONTRACT_ID_BYTES, ContractError, ContractId, Metadata, StandardBufSerializer,
 };
 use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as AccountSecretKey};
 use dusk_core::stake::STAKE_CONTRACT;
@@ -22,19 +22,19 @@ use dusk_core::transfer::phoenix::{
     Note, NoteLeaf, NoteOpening, NoteTreeItem, PublicKey as ShieldedPublicKey,
     SecretKey as ShieldedSecretKey,
 };
-use dusk_core::transfer::{Transaction, TRANSFER_CONTRACT};
+use dusk_core::transfer::{TRANSFER_CONTRACT, Transaction};
 use dusk_core::{BlsScalar, JubJubScalar, LUX};
-use dusk_vm::{execute, CallReceipt, ContractData, Error as VMError, ExecutionConfig, Session, VM};
+use dusk_vm::{CallReceipt, ContractData, Error as VMError, ExecutionConfig, Session, VM, execute};
 use ff::Field;
 use rkyv::bytecheck::CheckBytes;
-use rkyv::ser::serializers::{BufferScratch, BufferSerializer, CompositeSerializer};
 use rkyv::ser::Serializer;
+use rkyv::ser::serializers::{BufferScratch, BufferSerializer, CompositeSerializer};
 use rkyv::validation::validators::DefaultValidator;
-use rkyv::{check_archived_root, Archive, Deserialize, Infallible, Serialize};
+use rkyv::{Archive, Deserialize, Infallible, Serialize, check_archived_root};
 use rusk_prover::LocalProver;
 
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 const ZERO_ADDRESS: ContractId = ContractId::from_bytes([0; CONTRACT_ID_BYTES]);
 const GAS_LIMIT: u64 = 0x10_000_000;

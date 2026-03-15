@@ -8,7 +8,7 @@
 
 use syn::{ItemUse, UseTree};
 
-use crate::{is_relative_path_keyword, ImportExtraction, ImportInfo};
+use crate::{ImportExtraction, ImportInfo, is_relative_path_keyword};
 
 /// Extract imports from a `use` statement.
 pub(crate) fn imports_from_use(item_use: &ItemUse) -> ImportExtraction {

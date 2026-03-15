@@ -293,7 +293,7 @@ fn generate_decode_event_arms(events: &[EventInfo], type_map: &TypeMap) -> Vec<T
                 // Skip variable references (single lowercase identifier)
                 if topic_path.segments.len() == 1 {
                     let name = topic_path.segments[0].ident.to_string();
-                    if name.chars().next().map_or(false, char::is_lowercase) {
+                    if name.chars().next().is_some_and(char::is_lowercase) {
                         return None;
                     }
                 }

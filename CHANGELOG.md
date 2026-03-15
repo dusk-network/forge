@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Make local forge path overrides opt-in for release builds and harden CLI template/path handling across platforms.
+- Move the forge workspace and template project to Rust edition 2024 and bump published Dusk dependencies to their latest released versions.
 
 ### Fixed
 

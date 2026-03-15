@@ -1,6 +1,6 @@
 use crate::error::{CliError, Result};
 
-use super::embedded::{files, TemplateKind};
+use super::embedded::{TemplateKind, files};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractName {

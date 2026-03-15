@@ -258,13 +258,13 @@ All runtime dependencies go in the WASM-only section because contracts are gated
 
 ```toml
 [target.'cfg(target_family = "wasm")'.dependencies]
-dusk-core = "1.4"
-dusk-data-driver = { version = "0.3", optional = true }  # Only for data-driver
-dusk-forge = "0.1"
+dusk-core = "1.4.1"
+dusk-data-driver = { version = "0.3.1", optional = true }  # Only for data-driver
+dusk-forge = "0.2.2"
 
 [dev-dependencies]
-dusk-core = "1.4"   # Same types, but for host-side tests
-dusk-vm = "0.1"     # To run contract in tests
+dusk-core = "1.4.1"   # Same types, but for host-side tests
+dusk-vm = "1.4.3"     # To run contract in tests
 ```
 
 ### Features

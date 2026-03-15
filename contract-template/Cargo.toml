@@ -38,33 +38,23 @@
 [package]
 name = "YOUR_CONTRACT_NAME"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 # -----------------------------------------------------------------------------
 # WASM Dependencies (contract is gated by #![cfg(target_family = "wasm")])
 # -----------------------------------------------------------------------------
 [target.'cfg(target_family = "wasm")'.dependencies]
-dusk-core = "1.4"
-dusk-data-driver = { version = "0.3", optional = true }
+dusk-core = "1.4.1"
+dusk-data-driver = { version = "0.3.1", optional = true }
 dusk-forge = "0.2.2"
 
 # -----------------------------------------------------------------------------
 # Dev Dependencies (for tests running on the host, not in WASM)
 # -----------------------------------------------------------------------------
 [dev-dependencies]
-dusk-core = "1.4"
-dusk-vm = "1.4"
+dusk-core = "1.4.1"
+dusk-vm = "1.4.3"
 tempfile = "=3.10.1"
-
-# Pin transitive crates to versions compatible with the current nightly toolchain.
-# Keep these optional so they constrain resolution for generated projects
-# without becoming direct runtime dependencies of the template.
-[dependencies]
-blake2b_simd = { version = "=1.0.2", default-features = false, optional = true }
-blake3 = { version = "=1.5.4", default-features = false, optional = true }
-constant_time_eq = { version = "=0.3.1", optional = true }
-msgpacker = { version = "=0.4.3", default-features = false, optional = true }
-time-core = { version = "=0.1.6", optional = true }
 
 # -----------------------------------------------------------------------------
 # Features

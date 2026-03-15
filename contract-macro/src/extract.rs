@@ -14,10 +14,10 @@ use syn::{
 };
 
 use crate::{
-    extract_doc_comment, extract_feeds_attribute, extract_receiver, get_feed_exprs,
-    has_custom_attribute, has_empty_body, parse, validate, validate_feed_type_match, ContractData,
-    CustomDataDriverHandler, DataDriverRole, EmitVisitor, EventInfo, FunctionInfo, ImportInfo,
-    ParameterInfo, TraitImplInfo,
+    ContractData, CustomDataDriverHandler, DataDriverRole, EmitVisitor, EventInfo, FunctionInfo,
+    ImportInfo, ParameterInfo, TraitImplInfo, extract_doc_comment, extract_feeds_attribute,
+    extract_receiver, get_feed_exprs, has_custom_attribute, has_empty_body, parse, validate,
+    validate_feed_type_match,
 };
 
 /// Validate feed-related attributes for a method.
@@ -31,7 +31,7 @@ use crate::{
 fn validate_feeds(
     method: &ImplItemFn,
     name: &Ident,
-    feed_type: &Option<TokenStream2>,
+    feed_type: Option<&TokenStream2>,
 ) -> Result<(), syn::Error> {
     let feed_exprs = get_feed_exprs(method);
 
@@ -52,7 +52,7 @@ fn validate_feeds(
         ));
     }
 
-    if let Some(ref ft) = feed_type {
+    if let Some(ft) = feed_type {
         // Has feeds attribute - validate it matches the expressions
         if let Some(mismatch_msg) = validate_feed_type_match(&ft.to_string(), &feed_exprs) {
             return Err(syn::Error::new_spanned(&method.sig, mismatch_msg));
@@ -156,7 +156,7 @@ pub(crate) fn trait_methods(trait_impl: &TraitImplInfo) -> Result<Vec<FunctionIn
             // Validate feed-related attributes
             // (only check non-empty bodies since empty bodies delegate to trait defaults)
             if !is_default_impl {
-                validate_feeds(method, &name, &feed_type)?;
+                validate_feeds(method, &name, feed_type.as_ref())?;
             }
 
             // Extract parameters (name and type)
@@ -236,7 +236,7 @@ pub(crate) fn public_methods(impl_block: &ItemImpl) -> Result<Vec<FunctionInfo>,
             let receiver = extract_receiver(method);
 
             // Validate feed-related attributes
-            validate_feeds(method, &name, &feed_type)?;
+            validate_feeds(method, &name, feed_type.as_ref())?;
 
             // Extract parameters (name and type)
             let params = parameters(method);
@@ -884,7 +884,7 @@ mod tests {
             }
         };
         let name = format_ident!("stream_data");
-        let result = validate_feeds(&method, &name, &None);
+        let result = validate_feeds(&method, &name, None);
 
         let Err(err) = result else {
             panic!("expected error for missing feeds attribute");
@@ -911,7 +911,7 @@ mod tests {
         };
         let name = format_ident!("stream_multiple");
         let feed_type: TokenStream2 = quote! { u64 };
-        let result = validate_feeds(&method, &name, &Some(feed_type));
+        let result = validate_feeds(&method, &name, Some(&feed_type));
 
         let Err(err) = result else {
             panic!("expected error for multiple feed calls");
@@ -936,7 +936,7 @@ mod tests {
         };
         let name = format_ident!("stream_mismatch");
         let feed_type: TokenStream2 = quote! { (u64, u64) };
-        let result = validate_feeds(&method, &name, &Some(feed_type));
+        let result = validate_feeds(&method, &name, Some(&feed_type));
 
         let Err(err) = result else {
             panic!("expected error for tuple mismatch");
@@ -958,7 +958,7 @@ mod tests {
         };
         let name = format_ident!("stream_valid");
         let feed_type: TokenStream2 = quote! { u64 };
-        let result = validate_feeds(&method, &name, &Some(feed_type));
+        let result = validate_feeds(&method, &name, Some(&feed_type));
 
         assert!(result.is_ok(), "valid feeds usage should not error");
     }
@@ -971,7 +971,7 @@ mod tests {
             }
         };
         let name = format_ident!("regular_method");
-        let result = validate_feeds(&method, &name, &None);
+        let result = validate_feeds(&method, &name, None);
 
         assert!(
             result.is_ok(),
@@ -991,7 +991,7 @@ mod tests {
         };
         let name = format_ident!("stream_in_loop");
         let feed_type: TokenStream2 = quote! { u64 };
-        let result = validate_feeds(&method, &name, &Some(feed_type));
+        let result = validate_feeds(&method, &name, Some(&feed_type));
 
         // A single feed call inside a loop is valid
         assert!(result.is_ok(), "single feed call in loop should be valid");
@@ -1010,7 +1010,7 @@ mod tests {
         };
         let name = format_ident!("stream_multiple_in_loop");
         let feed_type: TokenStream2 = quote! { u64 };
-        let result = validate_feeds(&method, &name, &Some(feed_type));
+        let result = validate_feeds(&method, &name, Some(&feed_type));
 
         let Err(err) = result else {
             panic!("expected error for multiple feed calls in loop");
@@ -1034,7 +1034,7 @@ mod tests {
         };
         let name = format_ident!("stream_conditional");
         let feed_type: TokenStream2 = quote! { u64 };
-        let result = validate_feeds(&method, &name, &Some(feed_type));
+        let result = validate_feeds(&method, &name, Some(&feed_type));
 
         assert!(
             result.is_ok(),
@@ -1056,7 +1056,7 @@ mod tests {
         };
         let name = format_ident!("stream_branches");
         let feed_type: TokenStream2 = quote! { u64 };
-        let result = validate_feeds(&method, &name, &Some(feed_type));
+        let result = validate_feeds(&method, &name, Some(&feed_type));
 
         let Err(err) = result else {
             panic!("expected error for feed calls in multiple branches");
@@ -1078,7 +1078,7 @@ mod tests {
         };
         let name = format_ident!("stream_wants_tuple");
         let feed_type: TokenStream2 = quote! { (u64, String) };
-        let result = validate_feeds(&method, &name, &Some(feed_type));
+        let result = validate_feeds(&method, &name, Some(&feed_type));
 
         let Err(err) = result else {
             panic!("expected error for tuple mismatch");
@@ -1097,7 +1097,7 @@ mod tests {
         };
         let name = format_ident!("stream_sends_tuple");
         let feed_type: TokenStream2 = quote! { u64 };
-        let result = validate_feeds(&method, &name, &Some(feed_type));
+        let result = validate_feeds(&method, &name, Some(&feed_type));
 
         let Err(err) = result else {
             panic!("expected error for tuple mismatch");

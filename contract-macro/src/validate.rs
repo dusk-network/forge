@@ -69,16 +69,16 @@ pub(crate) fn public_method(method: &ImplItemFn) -> Result<(), syn::Error> {
     }
 
     // Check for self receiver: if present, must be borrowed (not consumed)
-    if let Some(FnArg::Receiver(receiver)) = method.sig.inputs.first() {
-        if receiver.reference.is_none() {
-            return Err(syn::Error::new_spanned(
-                receiver,
-                format!(
-                    "public method `{name}` cannot consume `self`; \
-                     use `&self` or `&mut self` instead"
-                ),
-            ));
-        }
+    if let Some(FnArg::Receiver(receiver)) = method.sig.inputs.first()
+        && receiver.reference.is_none()
+    {
+        return Err(syn::Error::new_spanned(
+            receiver,
+            format!(
+                "public method `{name}` cannot consume `self`; \
+                 use `&self` or `&mut self` instead"
+            ),
+        ));
     }
 
     Ok(())
@@ -403,9 +403,10 @@ mod tests {
             pub fn process<T>(&self, value: T) -> T { value }
         };
         let err = public_method(&method).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("cannot have generic or const parameters"));
+        assert!(
+            err.to_string()
+                .contains("cannot have generic or const parameters")
+        );
     }
 
     #[test]
@@ -423,9 +424,10 @@ mod tests {
             pub fn process<const N: usize>(&self) -> [u8; N] { [0; N] }
         };
         let err = public_method(&method).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("cannot have generic or const parameters"));
+        assert!(
+            err.to_string()
+                .contains("cannot have generic or const parameters")
+        );
     }
 
     #[test]
@@ -434,9 +436,10 @@ mod tests {
             pub fn process(&self, x: impl Display) {}
         };
         let err = public_method(&method).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("cannot use `impl Trait` in parameters"));
+        assert!(
+            err.to_string()
+                .contains("cannot use `impl Trait` in parameters")
+        );
     }
 
     #[test]
@@ -445,9 +448,10 @@ mod tests {
             pub fn iter(&self) -> impl Iterator<Item = u64> { std::iter::empty() }
         };
         let err = public_method(&method).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("cannot use `impl Trait` as return type"));
+        assert!(
+            err.to_string()
+                .contains("cannot use `impl Trait` as return type")
+        );
     }
 
     #[test]
@@ -712,9 +716,10 @@ mod tests {
             fn process<T>(&self, value: T) {}
         };
         let err = trait_method(&method, "Processor", false).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("cannot have generic or const parameters"));
+        assert!(
+            err.to_string()
+                .contains("cannot have generic or const parameters")
+        );
     }
 
     #[test]

@@ -5,7 +5,7 @@ edition.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 dusk-core = { workspace = true }
-dusk-data-driver = { version = "0.3", optional = true }
+dusk-data-driver = { version = "0.3.1", optional = true }
 dusk-forge = { path = "../.." }
 types = { path = "../types" }
 serde_json = { workspace = true, default-features = false, features = [
@@ -22,12 +22,6 @@ rkyv = { workspace = true, features = ["validation"] }
 rusk-prover = "1.3"
 serde_json = { workspace = true, default-features = true }
 wasmtime = "25"
-# Pin to avoid edition2024 issues (resolved via workspace)
-blake2b_simd = { workspace = true }
-blake3 = { workspace = true }
-constant_time_eq = { workspace = true }
-time-core = { workspace = true }
-uuid = { workspace = true } # Transitive pin to keep generated test graphs on the same toolchain-compatible set.
 
 [features]
 # Contract WASM build
