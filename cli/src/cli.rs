@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 
 use crate::build_runner::BuildTarget;
 
@@ -49,6 +50,12 @@ pub enum Commands {
     Test(TestArgs),
     /// Validate project structure and toolchain.
     Check(ProjectOptions),
+    /// Show macro-expanded code using cargo-expand.
+    Expand(ExpandArgs),
+    /// Remove contract-specific build artifact directories.
+    Clean(ProjectOptions),
+    /// Generate shell completion scripts.
+    Completions(CompletionsArgs),
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -108,4 +115,60 @@ pub struct TestArgs {
 
     /// Extra args passed through to `cargo test --release`.
     pub cargo_test_args: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ExpandArgs {
+    #[command(flatten)]
+    pub project: ProjectOptions,
+
+    /// Expand with the data-driver feature.
+    #[arg(long)]
+    pub data_driver: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct CompletionsArgs {
+    /// Shell to generate completions for.
+    #[arg(value_enum)]
+    pub shell: Shell,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use clap::Parser;
+
+    use super::{Cli, Commands};
+
+    #[test]
+    fn parses_expand_command() {
+        let cli = Cli::parse_from(["dusk-forge", "expand", "--data-driver"]);
+
+        match cli.command {
+            Commands::Expand(args) => assert!(args.data_driver),
+            other => panic!("expected expand command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_clean_command() {
+        let cli = Cli::parse_from(["dusk-forge", "clean", "--path", "demo"]);
+
+        match cli.command {
+            Commands::Clean(args) => assert_eq!(args.path, PathBuf::from("demo")),
+            other => panic!("expected clean command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_completions_command() {
+        let cli = Cli::parse_from(["dusk-forge", "completions", "bash"]);
+
+        match cli.command {
+            Commands::Completions(_) => {}
+            other => panic!("expected completions command, got {other:?}"),
+        }
+    }
 }
