@@ -134,7 +134,7 @@ mod test_contract {
             !self.items.is_empty()
         }
 
-        /// Returns a zero ItemId.
+        /// Returns a zero `ItemId`.
         ///
         /// Exercises: associated function (no self).
         pub fn empty_id() -> ItemId {

@@ -59,10 +59,6 @@ pub fn build(project: &ProjectMetadata, target: BuildTarget, verbose: bool) -> R
         .arg(&project.manifest_path)
         .arg("--color=always");
 
-    if target == BuildTarget::Contract {
-        cmd.arg("-Z").arg("build-std=core,alloc");
-    }
-
     let target_dir = match target {
         BuildTarget::Contract => &project.contract_target_dir,
         BuildTarget::DataDriver => &project.data_driver_target_dir,

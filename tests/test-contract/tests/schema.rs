@@ -529,8 +529,8 @@ use std::sync::LazyLock;
 use dusk_core::abi::ContractId;
 use dusk_core::dusk;
 use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as AccountSecretKey};
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use test_session::TestSession;
 use types::{Item, ItemId};
 

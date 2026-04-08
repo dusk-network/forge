@@ -1,7 +1,8 @@
 [package]
 name = "dusk-forge-cli"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 description = "CLI for scaffolding and building Dusk Forge contracts"
 license = "MPL-2.0"
 repository = "https://github.com/dusk-network/forge"

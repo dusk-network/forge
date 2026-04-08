@@ -10,7 +10,7 @@ use std::{
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -283,12 +283,16 @@ fn build_creates_contract_and_data_driver_artifacts() {
         .stderr(predicate::str::contains("contract wasm:"))
         .stderr(predicate::str::contains("data-driver wasm:"));
 
-    assert!(project
-        .join("target/contract/wasm32-unknown-unknown/release/smoke_contract.wasm")
-        .exists());
-    assert!(project
-        .join("target/data-driver/wasm32-unknown-unknown/release/smoke_contract.wasm")
-        .exists());
+    assert!(
+        project
+            .join("target/contract/wasm32-unknown-unknown/release/smoke_contract.wasm")
+            .exists()
+    );
+    assert!(
+        project
+            .join("target/data-driver/wasm32-unknown-unknown/release/smoke_contract.wasm")
+            .exists()
+    );
 
     let log = tools.log();
     assert!(log.contains("subcmd=build toolchain=+nightly-2024-07-30 feature=contract"));
@@ -315,9 +319,11 @@ fn test_builds_contract_and_runs_cargo_test() {
         .success()
         .stderr(predicate::str::contains("Tests completed"));
 
-    assert!(project
-        .join("target/contract/wasm32-unknown-unknown/release/smoke_contract.wasm")
-        .exists());
+    assert!(
+        project
+            .join("target/contract/wasm32-unknown-unknown/release/smoke_contract.wasm")
+            .exists()
+    );
 
     let log = tools.log();
     assert!(log.contains("subcmd=build toolchain=+nightly-2024-07-30 feature=contract"));

@@ -4,8 +4,6 @@
 //
 // Copyright (c) DUSK NETWORK. All rights reserved.
 
-#![feature(let_chains)]
-
 //! Procedural macro for the `#[contract]` attribute.
 //!
 //! This macro is applied to a module containing a contract struct and its
@@ -50,8 +48,8 @@ use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::quote;
 use syn::{
-    parse_macro_input, visit::Visit, Attribute, Expr, ExprCall, ExprLit, ExprPath, FnArg,
-    ImplItemFn, Item, ItemImpl, ItemMod, Lit, Type,
+    Attribute, Expr, ExprCall, ExprLit, ExprPath, FnArg, ImplItemFn, Item, ItemImpl, ItemMod, Lit,
+    Type, parse_macro_input, visit::Visit,
 };
 
 // ============================================================================

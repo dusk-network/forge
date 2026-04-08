@@ -13,8 +13,8 @@
 
 extern crate alloc;
 
-use std::sync::mpsc;
 use std::sync::LazyLock;
+use std::sync::mpsc;
 
 use dusk_core::abi::ContractId;
 use dusk_core::dusk;
@@ -26,8 +26,8 @@ use test_session::TestSession;
 
 use types::{Item, ItemId};
 
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 const DEPLOYER: [u8; 64] = [0u8; 64];
 
@@ -150,13 +150,6 @@ impl TestContractSession {
         self.session
             .call_public(sender_sk, CONTRACT_ID, "add_item", &item)
             .expect("add_item should succeed")
-    }
-
-    fn get_item(&mut self, id: ItemId) -> Option<Item> {
-        self.session
-            .direct_call::<_, Option<Item>>(CONTRACT_ID, "get_item", &id)
-            .expect("get_item should succeed")
-            .data
     }
 
     fn contains_item(&mut self, item: Item) -> bool {

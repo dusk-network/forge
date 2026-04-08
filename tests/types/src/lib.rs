@@ -63,8 +63,10 @@ pub trait Ownable {
         use dusk_core::abi;
         self.only_owner();
 
-        let previous_owner =
-            core::mem::replace(self.owner_mut(), Some(new_owner)).expect(error::INVALID_OWNER);
+        let previous_owner = self
+            .owner_mut()
+            .replace(new_owner)
+            .expect(error::INVALID_OWNER);
 
         abi::emit(
             events::OwnershipTransferred::TRANSFERRED,

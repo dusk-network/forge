@@ -10,7 +10,7 @@ use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{ImplItem, ItemImpl};
 
-use crate::{generate_arg_expr, EventInfo, FunctionInfo, ImportInfo, Receiver};
+use crate::{EventInfo, FunctionInfo, ImportInfo, Receiver, generate_arg_expr};
 
 /// Generate the schema constant.
 pub(crate) fn schema(
@@ -189,7 +189,7 @@ pub(crate) fn extern_wrappers(functions: &[FunctionInfo], contract_ident: &Ident
             };
 
             quote! {
-                #[no_mangle]
+                #[unsafe(no_mangle)]
                 unsafe extern "C" fn #fn_name(arg_len: u32) -> u32 {
                     dusk_core::abi::wrap_call(arg_len, |#closure_param| #method_call)
                 }
@@ -277,7 +277,7 @@ mod tests {
             mod __contract_extern_wrappers {
                 use super::*;
 
-                #[no_mangle]
+                #[unsafe(no_mangle)]
                 unsafe extern "C" fn is_paused(arg_len: u32) -> u32 {
                     dusk_core::abi::wrap_call(arg_len, |(): ()| STATE.is_paused())
                 }
@@ -315,7 +315,7 @@ mod tests {
             mod __contract_extern_wrappers {
                 use super::*;
 
-                #[no_mangle]
+                #[unsafe(no_mangle)]
                 unsafe extern "C" fn init(arg_len: u32) -> u32 {
                     dusk_core::abi::wrap_call(arg_len, |owner: Address| STATE.init(owner))
                 }
@@ -361,7 +361,7 @@ mod tests {
             mod __contract_extern_wrappers {
                 use super::*;
 
-                #[no_mangle]
+                #[unsafe(no_mangle)]
                 unsafe extern "C" fn transfer(arg_len: u32) -> u32 {
                     dusk_core::abi::wrap_call(arg_len, |(to, amount): (Address, u64)| STATE.transfer(to, amount))
                 }
@@ -408,12 +408,12 @@ mod tests {
             mod __contract_extern_wrappers {
                 use super::*;
 
-                #[no_mangle]
+                #[unsafe(no_mangle)]
                 unsafe extern "C" fn pause(arg_len: u32) -> u32 {
                     dusk_core::abi::wrap_call(arg_len, |(): ()| STATE.pause())
                 }
 
-                #[no_mangle]
+                #[unsafe(no_mangle)]
                 unsafe extern "C" fn unpause(arg_len: u32) -> u32 {
                     dusk_core::abi::wrap_call(arg_len, |(): ()| STATE.unpause())
                 }
@@ -446,7 +446,7 @@ mod tests {
             mod __contract_extern_wrappers {
                 use super::*;
 
-                #[no_mangle]
+                #[unsafe(no_mangle)]
                 unsafe extern "C" fn get_data(arg_len: u32) -> u32 {
                     dusk_core::abi::wrap_call(arg_len, |(): ()| STATE.get_data().clone())
                 }
@@ -484,7 +484,7 @@ mod tests {
             mod __contract_extern_wrappers {
                 use super::*;
 
-                #[no_mangle]
+                #[unsafe(no_mangle)]
                 unsafe extern "C" fn process(arg_len: u32) -> u32 {
                     dusk_core::abi::wrap_call(arg_len, |data: LargeStruct| STATE.process(&data))
                 }
@@ -522,7 +522,7 @@ mod tests {
             mod __contract_extern_wrappers {
                 use super::*;
 
-                #[no_mangle]
+                #[unsafe(no_mangle)]
                 unsafe extern "C" fn modify(arg_len: u32) -> u32 {
                     dusk_core::abi::wrap_call(arg_len, |data: Data| STATE.modify(&mut data))
                 }
