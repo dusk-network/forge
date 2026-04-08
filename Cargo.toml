@@ -20,7 +20,7 @@ dusk-core = { workspace = true }
 
 [workspace]
 resolver = "2"
-members = ["contract-macro", "tests/types", "tests/test-bridge", "cli"]
+members = ["contract-macro", "tests/types", "tests/test-contract", "cli"]
 exclude = ["contract-template"]
 
 [workspace.package]
@@ -32,7 +32,6 @@ dusk-forge-contract = { version = "0.1.1", path = "./contract-macro/" }
 
 dusk-core = "1.4"
 bytecheck = { version = "0.6.12", default-features = false }
-dusk-bytes = "0.1.7"
 rkyv = { version = "0.7", default-features = false, features = [
   "alloc",
   "size_32",

@@ -6,7 +6,7 @@
 
 //! Local copy of the `tests-setup` crate's `TestSession` and helpers.
 //!
-//! This removes the path dependency on `tests-setup`, making the test-bridge
+//! This removes the path dependency on `tests-setup`, making the test-contract
 //! crate fully standalone.
 
 use std::sync::mpsc;

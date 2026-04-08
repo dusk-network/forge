@@ -29,14 +29,14 @@ fn build_import_map(imports: &[ImportInfo]) -> HashMap<String, String> {
 /// Resolve a type path to its fully qualified form.
 ///
 /// Given a type like `Deposit` or `events::PauseToggled` and an import map,
-/// returns the fully qualified path like `evm_core::standard_bridge::Deposit`
-/// or `evm_core::standard_bridge::events::PauseToggled`.
+/// returns the fully qualified path like `my_crate::Deposit`
+/// or `my_crate::events::PauseToggled`.
 ///
 /// Handles:
-/// - Simple types: `Deposit` -> `evm_core::standard_bridge::Deposit`
-/// - Aliased types: `DSAddress` -> `evm_core::Address`
-/// - Multi-segment paths: `events::PauseToggled` -> `evm_core::standard_bridge::events::PauseToggled`
-/// - Generic types: `Option<Deposit>` -> `Option<evm_core::standard_bridge::Deposit>`
+/// - Simple types: `Deposit` -> `my_crate::Deposit`
+/// - Aliased types: `DSAddress` -> `my_crate::Address`
+/// - Multi-segment paths: `events::PauseToggled` -> `my_crate::events::PauseToggled`
+/// - Generic types: `Option<Deposit>` -> `Option<my_crate::Deposit>`
 fn resolve_type(ty: &TokenStream2, import_map: &HashMap<String, String>) -> String {
     let ty_str = ty.to_string();
 
@@ -231,58 +231,55 @@ mod tests {
 
     #[test]
     fn test_resolve_simple_type() {
-        let imports = vec![make_import("Deposit", "evm_core::standard_bridge::Deposit")];
+        let imports = vec![make_import("Deposit", "my_crate::Deposit")];
         let import_map = build_import_map(&imports);
 
         let ty = quote! { Deposit };
         let resolved = resolve_type(&ty, &import_map);
-        assert_eq!(resolved, "evm_core::standard_bridge::Deposit");
+        assert_eq!(resolved, "my_crate::Deposit");
     }
 
     #[test]
     fn test_resolve_aliased_type() {
-        let imports = vec![make_import("DSAddress", "evm_core::Address")];
+        let imports = vec![make_import("DSAddress", "my_crate::Address")];
         let import_map = build_import_map(&imports);
 
         let ty = quote! { DSAddress };
         let resolved = resolve_type(&ty, &import_map);
-        assert_eq!(resolved, "evm_core::Address");
+        assert_eq!(resolved, "my_crate::Address");
     }
 
     #[test]
     fn test_resolve_multi_segment_path() {
-        let imports = vec![make_import("events", "evm_core::standard_bridge::events")];
+        let imports = vec![make_import("events", "my_crate::events")];
         let import_map = build_import_map(&imports);
 
         let ty = quote! { events::PauseToggled };
         let resolved = resolve_type(&ty, &import_map);
-        assert_eq!(resolved, "evm_core::standard_bridge::events::PauseToggled");
+        assert_eq!(resolved, "my_crate::events::PauseToggled");
     }
 
     #[test]
     fn test_resolve_generic_type() {
-        let imports = vec![make_import("Deposit", "evm_core::standard_bridge::Deposit")];
+        let imports = vec![make_import("Deposit", "my_crate::Deposit")];
         let import_map = build_import_map(&imports);
 
         let ty = quote! { Option<Deposit> };
         let resolved = resolve_type(&ty, &import_map);
-        assert_eq!(resolved, "Option<evm_core::standard_bridge::Deposit>");
+        assert_eq!(resolved, "Option<my_crate::Deposit>");
     }
 
     #[test]
     fn test_resolve_tuple_type() {
         let imports = vec![
-            make_import("Deposit", "evm_core::standard_bridge::Deposit"),
-            make_import("DSAddress", "evm_core::Address"),
+            make_import("Deposit", "my_crate::Deposit"),
+            make_import("DSAddress", "my_crate::Address"),
         ];
         let import_map = build_import_map(&imports);
 
         let ty = quote! { (Deposit, DSAddress) };
         let resolved = resolve_type(&ty, &import_map);
-        assert_eq!(
-            resolved,
-            "(evm_core::standard_bridge::Deposit, evm_core::Address)"
-        );
+        assert_eq!(resolved, "(my_crate::Deposit, my_crate::Address)");
     }
 
     #[test]

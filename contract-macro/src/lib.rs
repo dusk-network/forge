@@ -17,15 +17,15 @@
 //! ```ignore
 //! #[contract]
 //! mod my_contract {
-//!     use evm_core::standard_bridge::SetU64;
-//!     use dusk_core::Address;
+//!     use my_crate::MyType;
+//!     use dusk_core::abi;
 //!
 //!     pub struct MyContract {
 //!         value: u64,
 //!     }
 //!
 //!     impl MyContract {
-//!         pub fn set_value(&mut self, value: SetU64) {
+//!         pub fn set_value(&mut self, value: MyType) {
 //!             // ...
 //!         }
 //!     }
@@ -63,7 +63,7 @@ use syn::{
 struct ImportInfo {
     /// The short name used in the contract (e.g., `SetU64`).
     name: String,
-    /// The full path to the type (e.g., `evm_core::standard_bridge::SetU64`).
+    /// The full path to the type (e.g., `my_crate::MyType`).
     path: String,
 }
 

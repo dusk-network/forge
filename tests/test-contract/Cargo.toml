@@ -1,5 +1,5 @@
 [package]
-name = "test-bridge"
+name = "test-contract"
 version = "0.1.0"
 edition.workspace = true
 

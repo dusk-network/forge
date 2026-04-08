@@ -1,5 +1,5 @@
 # =============================================================================
-# Test Bridge Contract Makefile
+# Test Contract Makefile
 # =============================================================================
 # This contract is used for testing the dusk-forge macro.
 #
@@ -181,7 +181,7 @@ clean: ## Clean all build artifacts
 
 .PHONY: help
 help: ## Show this help message
-	@echo "Test Bridge Makefile - $(CRATE_NAME)"
+	@echo "Test Contract Makefile - $(CRATE_NAME)"
 	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""

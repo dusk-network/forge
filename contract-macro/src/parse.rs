@@ -100,15 +100,12 @@ mod tests {
     #[test]
     fn test_extract_imports_simple() {
         let use_stmt: ItemUse = syn::parse_quote! {
-            use evm_core::standard_bridge::SetU64;
+            use my_crate::MyType;
         };
         let extraction = imports_from_use(&use_stmt);
         assert_eq!(extraction.imports.len(), 1);
-        assert_eq!(extraction.imports[0].name, "SetU64");
-        assert_eq!(
-            extraction.imports[0].path,
-            "evm_core::standard_bridge::SetU64"
-        );
+        assert_eq!(extraction.imports[0].name, "MyType");
+        assert_eq!(extraction.imports[0].path, "my_crate::MyType");
         assert!(!extraction.has_glob);
         assert!(!extraction.has_relative);
     }
@@ -129,7 +126,7 @@ mod tests {
     #[test]
     fn test_extract_imports_group() {
         let use_stmt: ItemUse = syn::parse_quote! {
-            use evm_core::standard_bridge::{SetU64, Deposit, EVMAddress};
+            use my_crate::{MyType, MyStruct, MyAddr};
         };
         let extraction = imports_from_use(&use_stmt);
         assert_eq!(extraction.imports.len(), 3);
@@ -137,22 +134,22 @@ mod tests {
         assert!(!extraction.has_relative);
 
         let names: Vec<_> = extraction.imports.iter().map(|i| i.name.as_str()).collect();
-        assert!(names.contains(&"SetU64"));
-        assert!(names.contains(&"Deposit"));
-        assert!(names.contains(&"EVMAddress"));
+        assert!(names.contains(&"MyType"));
+        assert!(names.contains(&"MyStruct"));
+        assert!(names.contains(&"MyAddr"));
 
-        let set_u64 = extraction
+        let my_type = extraction
             .imports
             .iter()
-            .find(|i| i.name == "SetU64")
+            .find(|i| i.name == "MyType")
             .unwrap();
-        assert_eq!(set_u64.path, "evm_core::standard_bridge::SetU64");
+        assert_eq!(my_type.path, "my_crate::MyType");
     }
 
     #[test]
     fn test_extract_imports_glob() {
         let use_stmt: ItemUse = syn::parse_quote! {
-            use evm_core::standard_bridge::*;
+            use my_crate::*;
         };
         let extraction = imports_from_use(&use_stmt);
         assert!(extraction.imports.is_empty());
@@ -163,11 +160,11 @@ mod tests {
     #[test]
     fn test_extract_imports_group_with_glob() {
         let use_stmt: ItemUse = syn::parse_quote! {
-            use evm_core::standard_bridge::{SetU64, events::*};
+            use my_crate::{MyType, events::*};
         };
         let extraction = imports_from_use(&use_stmt);
         assert_eq!(extraction.imports.len(), 1);
-        assert_eq!(extraction.imports[0].name, "SetU64");
+        assert_eq!(extraction.imports[0].name, "MyType");
         assert!(extraction.has_glob);
         assert!(!extraction.has_relative);
     }
