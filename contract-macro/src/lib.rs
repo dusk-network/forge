@@ -118,6 +118,7 @@ struct FunctionInfo {
 }
 
 /// Information about an event extracted from `abi::emit()` calls.
+#[derive(Clone)]
 struct EventInfo {
     /// The event topic string.
     topic: String,
@@ -385,6 +386,20 @@ fn has_custom_attribute(attrs: &[Attribute]) -> bool {
     })
 }
 
+/// Check if method has `#[contract(no_event)]` attribute to suppress the emit
+/// validation.
+fn event_suppressed(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if attr.path().is_ident("contract")
+            && let Ok(meta) = attr.meta.require_list()
+        {
+            let tokens = meta.tokens.to_string();
+            return tokens.contains("no_event");
+        }
+        false
+    })
+}
+
 /// Extract the `feeds` type from a `#[contract(feeds = "Type")]` attribute.
 ///
 /// This attribute specifies the type fed via `abi::feed()` for streaming
@@ -522,6 +537,8 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
             Err(e) => return e.to_compile_error().into(),
         }
         events.extend(extract::emit_calls(trait_impl.impl_block));
+        // Include events from method-level #[contract(emits = [...])] attributes
+        events.extend(extract::trait_method_emits(trait_impl));
     }
 
     // Deduplicate events by topic
