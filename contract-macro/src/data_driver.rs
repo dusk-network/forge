@@ -7,7 +7,8 @@
 //! Data driver module generation.
 //!
 //! Generates a `data_driver` module at crate root level containing a `Driver`
-//! struct that implements the `ConvertibleContract` trait from `dusk-data-driver`.
+//! struct that implements the `ConvertibleContract` trait from
+//! `dusk-data-driver`.
 //!
 //! The module is feature-gated with `#[cfg(feature = "data-driver")]` and uses
 //! fully-qualified type paths resolved at extraction time.
@@ -118,11 +119,13 @@ pub(crate) fn module(
     }
 }
 
-/// Get the resolved type path from the `type_map`, or return the original if not found.
+/// Get the resolved type path from the `type_map`, or return the original if
+/// not found.
 fn get_resolved_type(ty: &TokenStream2, type_map: &TypeMap) -> TokenStream2 {
     let key = ty.to_string();
     if let Some(resolved) = type_map.get(&key) {
-        // Parse the resolved string back into tokens as a Type (not Path, since tuples aren't paths)
+        // Parse the resolved string back into tokens as a Type (not Path, since tuples
+        // aren't paths)
         if let Ok(resolved_type) = syn::parse_str::<syn::Type>(resolved) {
             return quote! { #resolved_type };
         }
@@ -311,12 +314,15 @@ fn generate_decode_event_arms(events: &[EventInfo], type_map: &TypeMap) -> Vec<T
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::Receiver;
-    use quote::format_ident;
     use std::collections::HashMap;
 
-    /// Normalize token stream to a string with consistent whitespace for comparison.
+    use quote::format_ident;
+
+    use super::*;
+    use crate::Receiver;
+
+    /// Normalize token stream to a string with consistent whitespace for
+    /// comparison.
     fn normalize_tokens(tokens: TokenStream2) -> String {
         tokens
             .to_string()

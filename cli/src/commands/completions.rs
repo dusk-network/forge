@@ -3,10 +3,8 @@ use std::io;
 use clap::CommandFactory;
 use clap_complete::generate;
 
-use crate::{
-    cli::{Cli, CompletionsArgs},
-    error::Result,
-};
+use crate::cli::{Cli, CompletionsArgs};
+use crate::error::Result;
 
 pub fn run(args: CompletionsArgs) -> Result<()> {
     let mut cmd = Cli::command();

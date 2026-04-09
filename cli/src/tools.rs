@@ -1,7 +1,5 @@
-use std::{
-    env,
-    path::{Path, PathBuf},
-};
+use std::env;
+use std::path::{Path, PathBuf};
 
 pub fn find_in_path(program: &str) -> Option<PathBuf> {
     let program_path = Path::new(program);

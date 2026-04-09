@@ -1,12 +1,9 @@
 #![cfg(unix)]
 
-use std::{
-    env,
-    ffi::OsString,
-    fs,
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
-};
+use std::ffi::OsString;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;

@@ -1,8 +1,8 @@
 #[cfg(feature = "schema")]
 use std::fs;
 
-use crate::{cli::VerifyArgs, error::Result};
-
+use crate::cli::VerifyArgs;
+use crate::error::Result;
 #[cfg(feature = "schema")]
 use crate::{
     build_runner::{self, BuildTarget},

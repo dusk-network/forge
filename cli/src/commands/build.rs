@@ -1,12 +1,9 @@
 use std::fs;
 
-use crate::{
-    build_runner,
-    cli::BuildArgs,
-    error::Result,
-    project::{detect, metadata},
-    toolchain, ui,
-};
+use crate::cli::BuildArgs;
+use crate::error::Result;
+use crate::project::{detect, metadata};
+use crate::{build_runner, toolchain, ui};
 
 pub fn run(args: BuildArgs) -> Result<()> {
     let project = metadata::load(&args.project.path)?;

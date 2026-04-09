@@ -1,11 +1,9 @@
 use std::fs;
 
-use crate::{
-    cli::ProjectOptions,
-    error::Result,
-    project::{detect, metadata},
-    ui,
-};
+use crate::cli::ProjectOptions;
+use crate::error::Result;
+use crate::project::{detect, metadata};
+use crate::ui;
 
 pub fn run(args: ProjectOptions) -> Result<()> {
     let project = metadata::load(&args.path)?;

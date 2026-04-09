@@ -108,7 +108,6 @@ pub trait Ownable {
 /// Events emitted by the test contract.
 pub mod events {
     use dusk_core::signatures::bls::PublicKey;
-
     #[allow(unused_imports)]
     use rkyv::bytecheck::CheckBytes;
     use rkyv::{Archive, Deserialize, Serialize};

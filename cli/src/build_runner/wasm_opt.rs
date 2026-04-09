@@ -1,4 +1,5 @@
-use std::{path::Path, process::Command};
+use std::path::Path;
+use std::process::Command;
 
 use crate::error::{CliError, Result};
 use crate::tools;

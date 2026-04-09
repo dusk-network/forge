@@ -1,5 +1,5 @@
-use crate::{cli::CallArgs, error::Result};
-
+use crate::cli::CallArgs;
+use crate::error::Result;
 #[cfg(feature = "schema")]
 use crate::{
     build_runner::{self, BuildTarget},

@@ -47,9 +47,10 @@ mod validate;
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::quote;
+use syn::visit::Visit;
 use syn::{
     Attribute, Expr, ExprCall, ExprLit, ExprPath, FnArg, ImplItemFn, Item, ItemImpl, ItemMod, Lit,
-    Type, parse_macro_input, visit::Visit,
+    Type, parse_macro_input,
 };
 
 // ============================================================================
@@ -82,7 +83,8 @@ struct ParameterInfo {
     name: Ident,
     /// The type (dereferenced if the parameter is a reference).
     ty: TokenStream2,
-    /// Whether the parameter is a reference (requires `&` when passing to method).
+    /// Whether the parameter is a reference (requires `&` when passing to
+    /// method).
     is_ref: bool,
     /// Whether the parameter is a mutable reference.
     is_mut_ref: bool,
@@ -106,10 +108,12 @@ struct FunctionInfo {
     returns_ref: bool,
     /// The method's receiver type (`&self`, `&mut self`, or none).
     receiver: Receiver,
-    /// For trait methods with empty bodies: the trait name to call the default impl.
+    /// For trait methods with empty bodies: the trait name to call the default
+    /// impl.
     trait_name: Option<String>,
-    /// The type fed via `abi::feed()` for streaming functions (from `#[contract(feeds = "Type")]`).
-    /// When present, the data-driver uses this type for `decode_output_fn` instead of `output_type`.
+    /// The type fed via `abi::feed()` for streaming functions (from
+    /// `#[contract(feeds = "Type")]`). When present, the data-driver uses
+    /// this type for `decode_output_fn` instead of `output_type`.
     feed_type: Option<TokenStream2>,
 }
 
@@ -134,7 +138,8 @@ enum DataDriverRole {
 
 /// Information about a custom data-driver handler function.
 struct CustomDataDriverHandler {
-    /// The data-driver function name this handler is for (e.g., `"extra_data"`).
+    /// The data-driver function name this handler is for (e.g.,
+    /// `"extra_data"`).
     fn_name: String,
     /// Which role this handler plays.
     role: DataDriverRole,
@@ -243,7 +248,8 @@ fn get_feed_exprs(method: &ImplItemFn) -> Vec<String> {
     visitor.feed_exprs
 }
 
-/// Check if a type string looks like a tuple (starts with `(` and contains `,`).
+/// Check if a type string looks like a tuple (starts with `(` and contains
+/// `,`).
 fn looks_like_tuple(s: &str) -> bool {
     let trimmed = s.trim();
     trimmed.starts_with('(') && trimmed.contains(',')
@@ -381,9 +387,9 @@ fn has_custom_attribute(attrs: &[Attribute]) -> bool {
 
 /// Extract the `feeds` type from a `#[contract(feeds = "Type")]` attribute.
 ///
-/// This attribute specifies the type fed via `abi::feed()` for streaming functions.
-/// When present, the data-driver uses this type for `decode_output_fn` instead of the
-/// function's return type.
+/// This attribute specifies the type fed via `abi::feed()` for streaming
+/// functions. When present, the data-driver uses this type for
+/// `decode_output_fn` instead of the function's return type.
 ///
 /// Returns `Some(TokenStream2)` with the feed type if found, `None` otherwise.
 fn extract_feeds_attribute(attrs: &[Attribute]) -> Option<TokenStream2> {
@@ -461,7 +467,8 @@ fn generate_arg_expr(param: &ParameterInfo) -> TokenStream2 {
 /// This macro will produce compile errors if:
 /// - The module has no content (just a declaration like `mod foo;`)
 /// - The module contains glob imports (`use foo::*`)
-/// - The module contains relative imports (`use self::`, `use super::`, `use crate::`)
+/// - The module contains relative imports (`use self::`, `use super::`, `use
+///   crate::`)
 /// - The module contains multiple `pub struct` declarations
 /// - The module contains no `pub struct`
 /// - The module contains no impl block for the contract struct
@@ -593,8 +600,9 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use syn::visit::Visit;
+
+    use super::*;
 
     // =========================================================================
     // EmitVisitor tests
