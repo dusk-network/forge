@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Move workspace to Rust edition 2024 on the stable toolchain (MSRV 1.85). Generated contract wrappers now use `#[unsafe(no_mangle)]`.
+- Remove `-Z build-std=core,alloc` from contract builds (no longer needed on stable).
 - Replace EVM-flavored test-bridge with a general-purpose test contract that exercises every `#[contract]` macro code path without domain-specific types.
 - Make local forge path overrides opt-in for release builds and harden CLI template/path handling across platforms.
 
