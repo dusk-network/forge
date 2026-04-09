@@ -141,6 +141,7 @@ pub mod events {
 
     /// Event emitted when ownership is transferred or renounced.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[archive_attr(derive(CheckBytes))]
     pub struct OwnershipTransferred {
         /// The previous owner.
