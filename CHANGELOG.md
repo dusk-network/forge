@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Replace EVM-flavored test-bridge with a general-purpose test contract that exercises every `#[contract]` macro code path without domain-specific types.
 - Make local forge path overrides opt-in for release builds and harden CLI template/path handling across platforms.
 
 ### Fixed

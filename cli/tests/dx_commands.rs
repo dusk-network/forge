@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 fn scaffold_project(name: &str) -> (TempDir, PathBuf) {
     let tmp = tempdir().expect("tempdir");

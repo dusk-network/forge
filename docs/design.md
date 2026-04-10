@@ -8,34 +8,34 @@ Without the macro, contract function signatures are duplicated across multiple f
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ core/standard_bridge.rs                                                 │
-│   - Type definitions (Deposit, SetU64, WithdrawalId, etc.)              │
-│   - Event types                                                         │
+│ types/src/lib.rs                                                        │
+│   - Type definitions (Item, ItemId, events, etc.)                       │
+│   - Trait definitions (Ownable)                                         │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ StandardBridge/src/state.rs                                             │
-│   - Method signatures: fn deposit(&mut self, d: Deposit)                │
+│ contract/src/state.rs                                                   │
+│   - Method signatures: fn add_item(&mut self, item: Item)               │
 │   - Business logic                                                      │
 │   - Event emissions: abi::emit("topic", event_data)                     │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ StandardBridge/src/lib.rs (DUPLICATES state.rs)                         │
-│   - 34 extern "C" fn wrappers                                           │
+│ contract/src/lib.rs (DUPLICATES state.rs)                               │
+│   - N extern "C" fn wrappers                                            │
 │   - Repeats every function name                                         │
 │   - Repeats input type via wrap_call                                    │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ data-drivers/StandardBridge/src/lib.rs (DUPLICATES AGAIN)               │
-│   - 50+ match arms for encode_input_fn                                  │
-│   - 50+ match arms for decode_input_fn                                  │
-│   - 50+ match arms for decode_output_fn                                 │
-│   - 15+ match arms for decode_event                                     │
+│ data-drivers/contract/src/lib.rs (DUPLICATES AGAIN)                     │
+│   - N match arms for encode_input_fn                                    │
+│   - N match arms for decode_input_fn                                    │
+│   - N match arms for decode_output_fn                                   │
+│   - M match arms for decode_event                                       │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -47,21 +47,21 @@ With the `#[contract]` macro, everything derives from the contract module:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ core/standard_bridge.rs                                                 │
+│ types/src/lib.rs                                                        │
 │   - Type definitions (unchanged, these are shared types)                │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ StandardBridge/src/lib.rs  ← SINGLE SOURCE OF TRUTH                     │
+│ contract/src/lib.rs  ← SINGLE SOURCE OF TRUTH                           │
 │                                                                         │
 │   #[contract]                                                           │
-│   mod standard_bridge {                                                 │
-│       pub struct StandardBridge { ... }                                 │
-│       impl StandardBridge {                                             │
-│           pub fn init(&mut self, owner: DSAddress) { ... }              │
-│           pub fn is_paused(&self) -> bool { ... }                       │
-│           pub fn deposit(&mut self, d: Deposit) { ... }                 │
+│   mod my_contract {                                                     │
+│       pub struct MyContract { ... }                                     │
+│       impl MyContract {                                                 │
+│           pub fn init(&mut self, owner: PublicKey) { ... }              │
+│           pub fn counter(&self) -> u64 { ... }                          │
+│           pub fn add_item(&mut self, item: Item) { ... }               │
 │       }                                                                 │
 │   }                                                                     │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -90,13 +90,13 @@ use dusk_forge::contract;
 
 #[contract]
 mod my_contract {
-    use evm_core::standard_bridge::{Deposit, SetU64, WithdrawalId};
-    use evm_core::standard_bridge::events;
-    use evm_core::Address as DSAddress;
+    use dusk_core::abi;
+    use dusk_core::signatures::bls::PublicKey;
+    use types::{Item, ItemId, events};
 
     pub struct MyContract {
-        owner: Option<DSAddress>,
-        is_paused: bool,
+        owner: Option<PublicKey>,
+        counter: u64,
     }
 
     impl MyContract {
@@ -104,36 +104,33 @@ mod my_contract {
         pub const fn new() -> Self {
             Self {
                 owner: None,
-                is_paused: false,
+                counter: 0,
             }
         }
 
         /// Initializes the contract with an owner.
-        pub fn init(&mut self, owner: DSAddress) {
+        pub fn init(&mut self, owner: PublicKey) {
             self.owner = Some(owner);
         }
 
-        /// Returns whether the contract is paused.
-        pub fn is_paused(&self) -> bool {
-            self.is_paused
+        /// Returns the current counter value.
+        pub fn counter(&self) -> u64 {
+            self.counter
         }
 
-        /// Pauses the contract.
-        pub fn pause(&mut self) {
-            self.is_paused = true;
-            abi::emit(events::PauseToggled::PAUSED, events::PauseToggled());
+        /// Sets the counter to a new value.
+        pub fn set_counter(&mut self, value: u64) {
+            let previous = core::mem::replace(&mut self.counter, value);
+            abi::emit(
+                events::CounterUpdated::TOPIC,
+                events::CounterUpdated { previous, new: value },
+            );
         }
 
-        /// Deposits funds.
-        pub fn deposit(&mut self, deposit: Deposit) {
+        /// Adds an item to the collection.
+        pub fn add_item(&mut self, item: Item) {
             // ... implementation
-            abi::emit(events::TransactionDeposited::TOPIC, events::TransactionDeposited { ... });
-        }
-
-        /// Custom serialization needed for this function.
-        #[contract(custom)]
-        pub fn extra_data(&self, pk: PublicKey) -> Vec<u8> {
-            encode_ds_address(pk)
+            abi::emit(events::Item::ADDED, Item { ..item });
         }
 
         // Private helper - NOT exposed as contract function
@@ -154,6 +151,7 @@ The macro analyzes the contract module and extracts metadata:
 | `fn` (private) | Internal helper, not exported |
 | `&self` | Read-only method |
 | `&mut self` | Mutating method |
+| No self | Associated function |
 | Parameters after `self` | Input type (tupled if multiple) |
 | Return type | Output type (`()` if none) |
 | `abi::emit(topic, data)` | Event emission |
@@ -166,11 +164,30 @@ The macro analyzes the contract module and extracts metadata:
 To expose methods from trait implementations, use the `expose` attribute:
 
 ```rust
-#[contract(expose = [call_a, call_b])]
-impl SomeTrait for MyContract {
-    fn call_a(&mut self) { ... }
-    fn call_b(&self) -> u64 { ... }
-    fn internal_helper(&self) { ... }  // Not exposed
+#[contract(expose = [owner, transfer_ownership])]
+impl Ownable for MyContract {
+    fn owner(&self) -> Option<PublicKey> { self.owner }
+    fn owner_mut(&mut self) -> &mut Option<PublicKey> { &mut self.owner }
+
+    // Empty body = use the trait's default implementation
+    fn transfer_ownership(&mut self, new_owner: PublicKey) {}
+}
+```
+
+Only methods listed in `expose` become contract functions. Methods with empty bodies signal the macro to call the trait's default implementation instead.
+
+For traits with associated functions (no `&self`), the same pattern applies:
+
+```rust
+pub trait Versioned {
+    fn version() -> String {
+        String::from(env!("CARGO_PKG_VERSION"))
+    }
+}
+
+#[contract(expose = [version])]
+impl Versioned for MyContract {
+    fn version() -> String {}  // empty body = use trait default
 }
 ```
 
@@ -184,18 +201,18 @@ Use the `#[contract(feeds = "Type")]` attribute to specify the fed type:
 #[contract]
 mod my_contract {
     impl MyContract {
-        /// Feeds all pending withdrawals to the host.
-        #[contract(feeds = "(WithdrawalId, PendingWithdrawal)")]
-        pub fn pending_withdrawals(&self) {
-            for (id, pending) in &self.pending_withdrawals {
-                abi::feed((*id, *pending));
+        /// Feeds all items to the host as (ItemId, Item) tuples.
+        #[contract(feeds = "(ItemId, Item)")]
+        pub fn items(&self) {
+            for (id, item) in &self.items {
+                abi::feed((*id, *item));
             }
         }
 
-        /// Feeds all finalized withdrawal IDs to the host.
-        #[contract(feeds = "WithdrawalId")]
-        pub fn finalized_withdrawals(&self) {
-            for id in &self.finalized_withdrawals {
+        /// Feeds all item IDs to the host.
+        #[contract(feeds = "ItemId")]
+        pub fn item_ids(&self) {
+            for id in self.items.keys() {
                 abi::feed(*id);
             }
         }
@@ -219,7 +236,7 @@ These checks catch common mistakes at compile time rather than runtime.
 
 ### Custom Data-Driver Functions
 
-Sometimes you need data-driver functions that don't correspond to actual contract methods—for example, utility functions for encoding/decoding addresses or other custom serialization. These are "virtual" functions that only exist in the data-driver.
+Sometimes you need data-driver functions that don't correspond to actual contract methods—for example, utility functions for custom serialization. These are "virtual" functions that only exist in the data-driver.
 
 Use the `#[contract(encode_input = "fn_name")]`, `#[contract(decode_input = "fn_name")]`, or `#[contract(decode_output = "fn_name")]` attributes on functions to define custom handlers:
 
@@ -228,19 +245,26 @@ Use the `#[contract(encode_input = "fn_name")]`, `#[contract(decode_input = "fn_
 mod my_contract {
     // ... contract impl ...
 
-    /// Custom encoder for the "extra_data" data-driver function.
+    /// Custom encoder for the "raw_id" data-driver function.
     /// This function is NOT a contract method - it only exists in the data-driver.
-    #[contract(encode_input = "extra_data")]
-    fn encode_extra_data(json: &str) -> Result<Vec<u8>, dusk_data_driver::Error> {
-        let pk: dusk_core::signatures::bls::PublicKey = serde_json::from_str(json)?;
-        Ok(evm_core::standard_bridge::encode_ds_address(pk))
+    #[contract(encode_input = "raw_id")]
+    fn encode_raw_id(json: &str) -> Result<Vec<u8>, dusk_data_driver::Error> {
+        let id: u64 = serde_json::from_str(json)?;
+        Ok(id.to_le_bytes().to_vec())
     }
 
-    /// Custom decoder for the "extra_data" data-driver function.
-    #[contract(decode_output = "extra_data")]
-    fn decode_extra_data(rkyv: &[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error> {
-        let pk = evm_core::standard_bridge::decode_ds_address(rkyv)?;
-        Ok(serde_json::to_value(pk)?)
+    /// Custom decoder for the "raw_id" data-driver function.
+    #[contract(decode_output = "raw_id")]
+    fn decode_raw_id(bytes: &[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error> {
+        if bytes.len() != 8 {
+            return Err(dusk_data_driver::Error::Unsupported(
+                alloc::format!("expected 8 bytes, got {}", bytes.len())
+            ));
+        }
+        let mut buf = [0u8; 8];
+        buf.copy_from_slice(bytes);
+        let id = u64::from_le_bytes(buf);
+        Ok(serde_json::to_value(id)?)
     }
 }
 ```
@@ -267,32 +291,33 @@ A `CONTRACT_SCHEMA` constant is generated at the crate root, containing metadata
 
 ```rust
 pub const CONTRACT_SCHEMA: dusk_forge::schema::Contract = dusk_forge::schema::Contract {
-    name: "MyContract",
+    name: "TestContract",
     imports: &[
-        Import { name: "Deposit", path: "evm_core::standard_bridge::Deposit" },
-        Import { name: "DSAddress", path: "evm_core::Address" },
+        Import { name: "Item", path: "types::Item" },
+        Import { name: "ItemId", path: "types::ItemId" },
+        Import { name: "events", path: "types::events" },
         // ...
     ],
     functions: &[
         Function {
             name: "init",
             doc: "Initializes the contract with an owner.",
-            input: "DSAddress",
+            input: "PublicKey",
             output: "()",
             custom: false,
         },
         Function {
-            name: "is_paused",
-            doc: "Returns whether the contract is paused.",
+            name: "counter",
+            doc: "Returns the current counter value.",
             input: "()",
-            output: "bool",
+            output: "u64",
             custom: false,
         },
         // ...
     ],
     events: &[
-        Event { topic: "events::PauseToggled::PAUSED", data: "events::PauseToggled" },
-        Event { topic: "events::TransactionDeposited::TOPIC", data: "events::TransactionDeposited" },
+        Event { topic: "events::CounterUpdated::TOPIC", data: "events::CounterUpdated" },
+        Event { topic: "events::CounterReset::TOPIC", data: "events::CounterReset" },
         // ...
     ],
 };
@@ -305,17 +330,17 @@ When compiled without the `data-driver` feature, extern wrappers are generated f
 ```rust
 #[no_mangle]
 unsafe extern "C" fn init(arg_len: u32) -> u32 {
-    dusk_core::abi::wrap_call(arg_len, |owner: DSAddress| STATE.init(owner))
+    dusk_core::abi::wrap_call(arg_len, |owner: PublicKey| STATE.init(owner))
 }
 
 #[no_mangle]
-unsafe extern "C" fn is_paused(arg_len: u32) -> u32 {
-    dusk_core::abi::wrap_call(arg_len, |(): ()| STATE.is_paused())
+unsafe extern "C" fn counter(arg_len: u32) -> u32 {
+    dusk_core::abi::wrap_call(arg_len, |(): ()| STATE.counter())
 }
 
 #[no_mangle]
-unsafe extern "C" fn deposit(arg_len: u32) -> u32 {
-    dusk_core::abi::wrap_call(arg_len, |d: Deposit| STATE.deposit(d))
+unsafe extern "C" fn add_item(arg_len: u32) -> u32 {
+    dusk_core::abi::wrap_call(arg_len, |item: Item| STATE.add_item(item))
 }
 ```
 
@@ -331,23 +356,28 @@ pub mod data_driver {
     impl dusk_data_driver::ConvertibleContract for Driver {
         fn encode_input_fn(&self, fn_name: &str, json: &str) -> Result<Vec<u8>, Error> {
             match fn_name {
-                "init" => dusk_data_driver::json_to_rkyv::<evm_core::Address>(json),
-                "deposit" => dusk_data_driver::json_to_rkyv::<evm_core::standard_bridge::Deposit>(json),
+                "init" => dusk_data_driver::json_to_rkyv::<PublicKey>(json),
+                "add_item" => dusk_data_driver::json_to_rkyv::<types::Item>(json),
+                "set_counter" => dusk_data_driver::json_to_rkyv::<u64>(json),
                 // ...
             }
         }
 
         fn decode_output_fn(&self, fn_name: &str, rkyv: &[u8]) -> Result<JsonValue, Error> {
             match fn_name {
-                "is_paused" => dusk_data_driver::rkyv_to_json::<bool>(rkyv),
+                "counter" => dusk_data_driver::rkyv_to_json_u64(rkyv),
+                "has_items" => dusk_data_driver::rkyv_to_json::<bool>(rkyv),
+                "get_item" => dusk_data_driver::rkyv_to_json::<Option<types::Item>>(rkyv),
                 // ...
             }
         }
 
         fn decode_event(&self, event_name: &str, rkyv: &[u8]) -> Result<JsonValue, Error> {
             match event_name {
-                evm_core::standard_bridge::events::PauseToggled::PAUSED =>
-                    dusk_data_driver::rkyv_to_json::<evm_core::standard_bridge::events::PauseToggled>(rkyv),
+                types::events::CounterReset::TOPIC =>
+                    dusk_data_driver::rkyv_to_json::<types::events::CounterReset>(rkyv),
+                types::events::CounterUpdated::TOPIC =>
+                    dusk_data_driver::rkyv_to_json::<types::events::CounterUpdated>(rkyv),
                 // ...
             }
         }
@@ -383,10 +413,10 @@ The macro resolves short type names to fully-qualified paths using the import st
 
 | Short Name | Resolved Path |
 |------------|--------------|
-| `Deposit` | `evm_core::standard_bridge::Deposit` |
-| `DSAddress` (aliased) | `evm_core::Address` |
-| `events::PauseToggled` | `evm_core::standard_bridge::events::PauseToggled` |
-| `Option<Deposit>` | `Option<evm_core::standard_bridge::Deposit>` |
+| `Item` | `types::Item` |
+| `ItemId` | `types::ItemId` |
+| `events::CounterUpdated` | `types::events::CounterUpdated` |
+| `Option<Item>` | `Option<types::Item>` |
 
 This ensures the data-driver can reference types correctly even though it's in a different module context.
 
@@ -416,8 +446,8 @@ Contracts using the macro need feature flags in `Cargo.toml`:
 
 ```toml
 [features]
-contract = ["dusk-core/abi-dlmalloc", "evm-core/abi"]
-data-driver = ["dep:dusk-data-driver", "dusk-data-driver/wasm-export", "evm-core/serde"]
+contract = ["dusk-core/abi-dlmalloc", "types/abi"]
+data-driver = ["dep:dusk-data-driver", "dusk-data-driver/wasm-export", "types/serde"]
 
 [dependencies]
 dusk-core = { workspace = true }
@@ -433,23 +463,23 @@ No default feature is defined. Build commands explicitly select the feature:
 ### Multiple Parameters
 
 ```rust
-pub fn verify_sig(&self, threshold: u8, msg: Vec<u8>, sig: Signature) -> bool
+pub fn update(&mut self, counter: u64, label: String)
 ```
 
-Input type becomes a tuple: `(u8, Vec<u8>, Signature)`
+Input type becomes a tuple: `(u64, String)`
 
 ### No Parameters (getters)
 
 ```rust
-pub fn is_paused(&self) -> bool
+pub fn counter(&self) -> u64
 ```
 
-Input type: `()`, Output type: `bool`
+Input type: `()`, Output type: `u64`
 
 ### No Return (mutations)
 
 ```rust
-pub fn pause(&mut self)
+pub fn reset_counter(&mut self)
 ```
 
 Input type: `()`, Output type: `()`
@@ -457,26 +487,42 @@ Input type: `()`, Output type: `()`
 ### Reference Returns
 
 ```rust
-pub fn get_data(&self) -> &SomeType
+pub fn label(&self) -> &String
 ```
 
 The wrapper calls `.clone()` before serialization to handle the borrow.
+
+### Reference Parameters
+
+```rust
+pub fn contains_item(&self, item: &Item) -> bool
+```
+
+The wrapper receives an owned `Item` and passes `&item` to the method.
+
+### Associated Functions
+
+```rust
+pub fn empty_id() -> ItemId
+```
+
+No `STATE` access needed. The wrapper calls `MyContract::empty_id()` directly.
 
 ### Custom Serialization
 
 ```rust
 #[contract(custom)]
-pub fn extra_data(&self, pk: PublicKey) -> Vec<u8>
+pub fn raw_bytes(&self, data: Vec<u8>) -> Vec<u8>
 ```
 
-Marked in schema with `custom: true`. The data-driver returns an "unsupported" error for these functions - custom handlers must be implemented manually if needed.
+Marked in schema with `custom: true`. The data-driver returns an "unsupported" error for these functions — custom handlers must be provided via `#[contract(encode_input = "...")]` / `#[contract(decode_output = "...")]` if data-driver support is needed.
 
 ## Comparison
 
 | Aspect | Without Macro | With Macro |
 |--------|--------------|------------|
 | Add new function | Edit 3 files | Edit 1 file |
-| Lines in lib.rs | ~100 (34 externs) | ~0 (generated) |
+| Lines in lib.rs | ~100 (N externs) | ~0 (generated) |
 | Separate data-driver crate | Required (~300 lines) | Not needed (generated) |
 | Schema | Manual / `todo!()` | Auto-generated |
 | Schema drift | Possible | Impossible |
@@ -494,5 +540,5 @@ The `#[contract]` macro provides:
 - **Minimal annotation**: Just `#[contract]` on the module
 
 Manual work remaining:
-- Type definitions (shared in `core/`)
+- Type definitions (shared in `types/`)
 - Custom serialization handlers (rare, via `#[contract(custom)]`)

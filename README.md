@@ -349,7 +349,7 @@ dusk-forge/
 ├── src/lib.rs          # Re-exports the contract macro
 ├── contract-macro/     # Proc-macro implementation
 ├── contract-template/  # Template for new contracts
-├── tests/test-bridge/  # Integration tests
+├── tests/test-contract/ # Integration tests
 └── docs/
     └── design.md       # Detailed macro internals
 ```

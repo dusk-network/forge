@@ -42,7 +42,7 @@ pub struct Event {
 pub struct Import {
     /// The short name used in the contract (e.g., `SetU64`).
     pub name: &'static str,
-    /// The full path to the type (e.g., `evm_core::standard_bridge::SetU64`).
+    /// The full path to the type (e.g., `my_crate::MyType`).
     pub path: &'static str,
 }
 

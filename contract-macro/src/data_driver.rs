@@ -293,7 +293,7 @@ fn generate_decode_event_arms(events: &[EventInfo], type_map: &TypeMap) -> Vec<T
                 // Skip variable references (single lowercase identifier)
                 if topic_path.segments.len() == 1 {
                     let name = topic_path.segments[0].ident.to_string();
-                    if name.chars().next().map_or(false, char::is_lowercase) {
+                    if name.starts_with(char::is_lowercase) {
                         return None;
                     }
                 }
@@ -382,12 +382,12 @@ mod tests {
     #[test]
     fn test_get_resolved_type_found_in_map() {
         let mut type_map = HashMap::new();
-        type_map.insert("Address".to_string(), "evm_core::Address".to_string());
+        type_map.insert("Address".to_string(), "my_crate::Address".to_string());
 
         let ty = quote! { Address };
         let resolved = get_resolved_type(&ty, &type_map);
 
-        assert_eq!(normalize_tokens(resolved), "evm_core :: Address");
+        assert_eq!(normalize_tokens(resolved), "my_crate :: Address");
     }
 
     #[test]
@@ -403,18 +403,12 @@ mod tests {
     #[test]
     fn test_get_resolved_type_complex_path() {
         let mut type_map = HashMap::new();
-        type_map.insert(
-            "Deposit".to_string(),
-            "evm_core::standard_bridge::Deposit".to_string(),
-        );
+        type_map.insert("Deposit".to_string(), "my_crate::Deposit".to_string());
 
         let ty = quote! { Deposit };
         let resolved = get_resolved_type(&ty, &type_map);
 
-        assert_eq!(
-            normalize_tokens(resolved),
-            "evm_core :: standard_bridge :: Deposit"
-        );
+        assert_eq!(normalize_tokens(resolved), "my_crate :: Deposit");
     }
 
     // =========================================================================
@@ -424,7 +418,7 @@ mod tests {
     #[test]
     fn test_encode_input_simple_type() {
         let mut type_map = HashMap::new();
-        type_map.insert("Address".to_string(), "evm_core::Address".to_string());
+        type_map.insert("Address".to_string(), "my_crate::Address".to_string());
 
         let functions = vec![make_function(
             "init",
@@ -439,7 +433,7 @@ mod tests {
         assert!(arm_str.contains("\"init\""), "Should contain function name");
         assert!(arm_str.contains("json_to_rkyv"), "Should use json_to_rkyv");
         assert!(
-            arm_str.contains("evm_core :: Address"),
+            arm_str.contains("my_crate :: Address"),
             "Should use resolved type"
         );
     }
@@ -468,7 +462,7 @@ mod tests {
         // Key must match the exact token stream string representation
         type_map.insert(
             "(Address , u64)".to_string(),
-            "(evm_core::Address, u64)".to_string(),
+            "(my_crate::Address, u64)".to_string(),
         );
 
         let functions = vec![make_function(
@@ -485,7 +479,7 @@ mod tests {
         assert!(arm_str.contains("json_to_rkyv"));
         // Verify the resolved tuple type is used
         assert!(
-            arm_str.contains("evm_core :: Address"),
+            arm_str.contains("my_crate :: Address"),
             "Should use resolved type in tuple: {}",
             arm_str
         );
@@ -558,7 +552,7 @@ mod tests {
     #[test]
     fn test_decode_input_simple_type() {
         let mut type_map = HashMap::new();
-        type_map.insert("Deposit".to_string(), "evm_core::Deposit".to_string());
+        type_map.insert("Deposit".to_string(), "my_crate::Deposit".to_string());
 
         let functions = vec![make_function(
             "deposit",
@@ -572,7 +566,7 @@ mod tests {
         let arm_str = normalize_tokens(arms[0].clone());
         assert!(arm_str.contains("\"deposit\""));
         assert!(arm_str.contains("rkyv_to_json"));
-        assert!(arm_str.contains("evm_core :: Deposit"));
+        assert!(arm_str.contains("my_crate :: Deposit"));
     }
 
     #[test]
@@ -618,13 +612,13 @@ mod tests {
         let mut type_map = HashMap::new();
         // Key must match the exact token stream string representation
         type_map.insert(
-            "(Address , EVMAddress , u64)".to_string(),
-            "(evm_core::Address, evm_core::EVMAddress, u64)".to_string(),
+            "(Address , MyAddr , u64)".to_string(),
+            "(my_crate::Address, my_crate::MyAddr, u64)".to_string(),
         );
 
         let functions = vec![make_function(
             "transfer_with_fee",
-            quote! { (Address, EVMAddress, u64) },
+            quote! { (Address, MyAddr, u64) },
             quote! { () },
             false,
         )];
@@ -636,13 +630,13 @@ mod tests {
         assert!(arm_str.contains("rkyv_to_json"));
         // Verify the resolved tuple type is used
         assert!(
-            arm_str.contains("evm_core :: Address"),
+            arm_str.contains("my_crate :: Address"),
             "Should use resolved Address type in tuple: {}",
             arm_str
         );
         assert!(
-            arm_str.contains("evm_core :: EVMAddress"),
-            "Should use resolved EVMAddress type in tuple: {}",
+            arm_str.contains("my_crate :: MyAddr"),
+            "Should use resolved MyAddr type in tuple: {}",
             arm_str
         );
     }
@@ -713,7 +707,7 @@ mod tests {
     #[test]
     fn test_encode_input_mixed_regular_and_custom() {
         let mut type_map = HashMap::new();
-        type_map.insert("Address".to_string(), "evm_core::Address".to_string());
+        type_map.insert("Address".to_string(), "my_crate::Address".to_string());
 
         let functions = vec![
             make_function("init", quote! { Address }, quote! { () }, false),
@@ -849,14 +843,14 @@ mod tests {
     fn test_decode_output_complex_type() {
         let mut type_map = HashMap::new();
         type_map.insert(
-            "Option < PendingWithdrawal >".to_string(),
-            "Option<evm_core::PendingWithdrawal>".to_string(),
+            "Option < PendingItem >".to_string(),
+            "Option<my_crate::PendingItem>".to_string(),
         );
 
         let functions = vec![make_function(
             "pending_withdrawal",
-            quote! { WithdrawalId },
-            quote! { Option<PendingWithdrawal> },
+            quote! { ItemId },
+            quote! { Option<PendingItem> },
             false,
         )];
         let arms = generate_decode_output_arms(&functions, &type_map, &[]);
@@ -867,7 +861,7 @@ mod tests {
         assert!(arm_str.contains("rkyv_to_json"));
         // Verify the resolved type is used
         assert!(
-            arm_str.contains("evm_core :: PendingWithdrawal"),
+            arm_str.contains("my_crate :: PendingItem"),
             "Should use resolved type: {}",
             arm_str
         );
@@ -940,16 +934,16 @@ mod tests {
     fn test_decode_output_uses_feed_type_instead_of_output_type() {
         let mut type_map = HashMap::new();
         type_map.insert(
-            "(WithdrawalId , PendingWithdrawal)".to_string(),
-            "(evm_core::WithdrawalId, evm_core::PendingWithdrawal)".to_string(),
+            "(ItemId , PendingItem)".to_string(),
+            "(my_crate::ItemId, my_crate::PendingItem)".to_string(),
         );
 
-        // Function returns () but feeds (WithdrawalId, PendingWithdrawal)
+        // Function returns () but feeds (ItemId, PendingItem)
         let functions = vec![make_function_with_feed(
             "pending_withdrawals",
             quote! { () },
             quote! { () },
-            quote! { (WithdrawalId, PendingWithdrawal) },
+            quote! { (ItemId, PendingItem) },
         )];
         let arms = generate_decode_output_arms(&functions, &type_map, &[]);
 
@@ -968,7 +962,7 @@ mod tests {
             arm_str
         );
         assert!(
-            arm_str.contains("evm_core :: WithdrawalId"),
+            arm_str.contains("my_crate :: ItemId"),
             "Should use resolved feed type: {}",
             arm_str
         );
@@ -977,17 +971,14 @@ mod tests {
     #[test]
     fn test_decode_output_feed_type_simple() {
         let mut type_map = HashMap::new();
-        type_map.insert(
-            "WithdrawalId".to_string(),
-            "evm_core::WithdrawalId".to_string(),
-        );
+        type_map.insert("ItemId".to_string(), "my_crate::ItemId".to_string());
 
-        // Function returns () but feeds WithdrawalId
+        // Function returns () but feeds ItemId
         let functions = vec![make_function_with_feed(
             "finalized_withdrawals",
             quote! { () },
             quote! { () },
-            quote! { WithdrawalId },
+            quote! { ItemId },
         )];
         let arms = generate_decode_output_arms(&functions, &type_map, &[]);
 
@@ -995,7 +986,7 @@ mod tests {
         let arm_str = normalize_tokens(arms[0].clone());
         assert!(arm_str.contains("\"finalized_withdrawals\""));
         assert!(
-            arm_str.contains("evm_core :: WithdrawalId"),
+            arm_str.contains("my_crate :: ItemId"),
             "Should use resolved feed type: {}",
             arm_str
         );
@@ -1051,11 +1042,11 @@ mod tests {
         let mut type_map = HashMap::new();
         type_map.insert(
             "events::PauseToggled::PAUSED".to_string(),
-            "evm_core::events::PauseToggled::PAUSED".to_string(),
+            "my_crate::events::PauseToggled::PAUSED".to_string(),
         );
         type_map.insert(
             "events :: PauseToggled".to_string(),
-            "evm_core::events::PauseToggled".to_string(),
+            "my_crate::events::PauseToggled".to_string(),
         );
 
         let events = vec![make_event(
@@ -1068,13 +1059,13 @@ mod tests {
         let arm_str = normalize_tokens(arms[0].clone());
         // Verify topic is resolved
         assert!(
-            arm_str.contains("evm_core :: events :: PauseToggled :: PAUSED"),
+            arm_str.contains("my_crate :: events :: PauseToggled :: PAUSED"),
             "Topic should be resolved: {}",
             arm_str
         );
         // Verify data type is resolved
         assert!(
-            arm_str.contains("rkyv_to_json :: < evm_core :: events :: PauseToggled >"),
+            arm_str.contains("rkyv_to_json :: < my_crate :: events :: PauseToggled >"),
             "Data type should be resolved: {}",
             arm_str
         );
@@ -1130,20 +1121,20 @@ mod tests {
 
         // A string literal topic that cannot be parsed as a syn::Path
         // (e.g., contains characters not valid in Rust paths)
-        let events = vec![make_event("bridge/deposited", quote! { DepositEvent })];
+        let events = vec![make_event("custom/event", quote! { TransferEvent })];
         let arms = generate_decode_event_arms(&events, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
         // String literal topics are used directly in the match arm
         assert!(
-            arm_str.contains("\"bridge/deposited\""),
+            arm_str.contains("\"custom/event\""),
             "Should use string literal topic: {}",
             arm_str
         );
         assert!(
-            arm_str.contains("rkyv_to_json :: < DepositEvent >"),
-            "Should decode to DepositEvent type: {}",
+            arm_str.contains("rkyv_to_json :: < TransferEvent >"),
+            "Should decode to TransferEvent type: {}",
             arm_str
         );
     }
@@ -1153,16 +1144,16 @@ mod tests {
         let mut type_map = HashMap::new();
         type_map.insert(
             "events::PauseToggled::PAUSED".to_string(),
-            "evm_core::events::PauseToggled::PAUSED".to_string(),
+            "my_crate::events::PauseToggled::PAUSED".to_string(),
         );
         type_map.insert(
-            "events::BridgeInitiated::TOPIC".to_string(),
-            "evm_core::events::BridgeInitiated::TOPIC".to_string(),
+            "events::ItemAdded::TOPIC".to_string(),
+            "my_crate::events::ItemAdded::TOPIC".to_string(),
         );
 
         let events = vec![
             make_event("events::PauseToggled::PAUSED", quote! { PauseToggled }),
-            make_event("events::BridgeInitiated::TOPIC", quote! { BridgeInitiated }),
+            make_event("events::ItemAdded::TOPIC", quote! { ItemAdded }),
         ];
         let arms = generate_decode_event_arms(&events, &type_map);
 
@@ -1171,16 +1162,16 @@ mod tests {
         // Verify both events are present with correct resolved topics
         let all_arms: String = arms.iter().map(|a| normalize_tokens(a.clone())).collect();
         assert!(
-            all_arms.contains("evm_core :: events :: PauseToggled :: PAUSED"),
+            all_arms.contains("my_crate :: events :: PauseToggled :: PAUSED"),
             "Should contain resolved PauseToggled topic"
         );
         assert!(
-            all_arms.contains("evm_core :: events :: BridgeInitiated :: TOPIC"),
-            "Should contain resolved BridgeInitiated topic"
+            all_arms.contains("my_crate :: events :: ItemAdded :: TOPIC"),
+            "Should contain resolved ItemAdded topic"
         );
         // Verify data types are present
         assert!(all_arms.contains("PauseToggled"));
-        assert!(all_arms.contains("BridgeInitiated"));
+        assert!(all_arms.contains("ItemAdded"));
     }
 
     // =========================================================================
@@ -1190,7 +1181,7 @@ mod tests {
     #[test]
     fn test_module_generates_complete_structure() {
         let mut type_map = HashMap::new();
-        type_map.insert("Address".to_string(), "evm_core::Address".to_string());
+        type_map.insert("Address".to_string(), "my_crate::Address".to_string());
 
         let functions = vec![
             make_function("init", quote! { Address }, quote! { () }, false),

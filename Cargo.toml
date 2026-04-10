@@ -1,7 +1,8 @@
 [package]
 name = "dusk-forge"
 version = "0.2.2"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 description = "A smart contract development framework for Dusk"
 license = "MPL-2.0"
 repository = "https://github.com/dusk-network/forge"
@@ -20,19 +21,19 @@ dusk-core = { workspace = true }
 
 [workspace]
 resolver = "2"
-members = ["contract-macro", "tests/types", "tests/test-bridge", "cli"]
+members = ["contract-macro", "tests/types", "tests/test-contract", "cli"]
 exclude = ["contract-template"]
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 
 [workspace.dependencies]
 # Workspace internal dependencies
 dusk-forge-contract = { version = "0.1.1", path = "./contract-macro/" }
 
-dusk-core = "1.4"
+dusk-core = { version = "1.6", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0" }
 bytecheck = { version = "0.6.12", default-features = false }
-dusk-bytes = "0.1.7"
 rkyv = { version = "0.7", default-features = false, features = [
   "alloc",
   "size_32",
@@ -45,27 +46,20 @@ serde_json = { version = "1", default-features = false }
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "visit"] }
-# Keep this on a pre-edition-2024 release until the workspace toolchain moves
-# forward; newer releases require a newer Cargo parser than this branch uses.
-assert_cmd = "=2.1.1"
+assert_cmd = "2"
 cargo_metadata = "0.19"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 colored = "3"
 predicates = "3"
-tempfile = "=3.10.1"
+tempfile = "3"
 thiserror = "2"
 toml = "0.8"
 wasmtime = "25"
+blake3 = "1"
 
 # Pin to match L1Contracts versions
-dusk-vm = { version = "=1.4.0", default-features = false }
-# Pin to avoid edition2024 issues
-blake2b_simd = "=1.0.2"
-blake3 = "=1.5.4"
-constant_time_eq = "=0.3.1"
-time-core = "=0.1.6"
-uuid = "=1.20.0"
+dusk-vm = { version = "1.6", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0", default-features = false }
 
 # Enable overflow checks in release builds for contract safety
 [profile.release]

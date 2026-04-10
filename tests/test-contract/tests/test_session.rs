@@ -6,35 +6,30 @@
 
 //! Local copy of the `tests-setup` crate's `TestSession` and helpers.
 //!
-//! This removes the path dependency on `tests-setup`, making the test-bridge
+//! This removes the path dependency on `tests-setup`, making the test-contract
 //! crate fully standalone.
 
-use std::sync::mpsc;
-
 use dusk_core::abi::{
-    ContractError, ContractId, Metadata, StandardBufSerializer, CONTRACT_ID_BYTES,
+    CONTRACT_ID_BYTES, ContractError, ContractId, Metadata, StandardBufSerializer,
 };
 use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as AccountSecretKey};
 use dusk_core::stake::STAKE_CONTRACT;
 use dusk_core::transfer::data::ContractCall;
 use dusk_core::transfer::moonlight::AccountData;
-use dusk_core::transfer::phoenix::{
-    Note, NoteLeaf, NoteOpening, NoteTreeItem, PublicKey as ShieldedPublicKey,
-    SecretKey as ShieldedSecretKey,
-};
-use dusk_core::transfer::{Transaction, TRANSFER_CONTRACT};
-use dusk_core::{BlsScalar, JubJubScalar, LUX};
-use dusk_vm::{execute, CallReceipt, ContractData, Error as VMError, ExecutionConfig, Session, VM};
+use dusk_core::transfer::phoenix::{Note, PublicKey as ShieldedPublicKey};
+use dusk_core::transfer::{TRANSFER_CONTRACT, Transaction};
+use dusk_core::{JubJubScalar, LUX};
+use dusk_vm::host_queries::{self, HardFork};
+use dusk_vm::{CallReceipt, ContractData, Error as VMError, ExecutionConfig, Session, VM, execute};
 use ff::Field;
 use rkyv::bytecheck::CheckBytes;
-use rkyv::ser::serializers::{BufferScratch, BufferSerializer, CompositeSerializer};
 use rkyv::ser::Serializer;
+use rkyv::ser::serializers::{BufferScratch, BufferSerializer, CompositeSerializer};
 use rkyv::validation::validators::DefaultValidator;
-use rkyv::{check_archived_root, Archive, Deserialize, Infallible, Serialize};
-use rusk_prover::LocalProver;
+use rkyv::{Archive, Deserialize, Infallible, Serialize, check_archived_root};
 
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 const ZERO_ADDRESS: ContractId = ContractId::from_bytes([0; CONTRACT_ID_BYTES]);
 const GAS_LIMIT: u64 = 0x10_000_000;
@@ -47,12 +42,16 @@ const CONFIG: ExecutionConfig = ExecutionConfig {
     with_public_sender: true,
     with_blob: true,
     disable_wasm64: false,
+    disable_wasm32: false,
+    disable_3rd_party: false,
+    phoenix_refund_check: false,
 };
 
 /// VM Session that has the transfer- and stake-contract deployed and behaves
 /// like a mainnet VM.
 pub struct TestSession(pub Session);
 
+#[allow(dead_code)]
 impl TestSession {
     /// Passes the call to deploy bytecode of a contract to the
     /// underlying session with maximum gas limit.
@@ -68,16 +67,6 @@ impl TestSession {
         self.0.deploy(bytecode, deploy_data, u64::MAX)
     }
 
-    /// Returns the current block-height.
-    pub fn block_height(&self) -> u64 {
-        rkyv_deserialize(self.0.meta(Metadata::BLOCK_HEIGHT).unwrap())
-    }
-
-    /// Sets a new block-height.
-    pub fn set_block_height(&mut self, block_height: u64) {
-        let _ = self.0.set_meta(Metadata::BLOCK_HEIGHT, block_height);
-    }
-
     /// Query the transfer-contract for the current chain-id.
     fn chain_id(&self) -> u8 {
         rkyv_deserialize(self.0.meta(Metadata::CHAIN_ID).unwrap())
@@ -88,19 +77,6 @@ impl TestSession {
     pub fn account(&mut self, pk: &AccountPublicKey) -> Result<AccountData, VMError> {
         self.0
             .call(TRANSFER_CONTRACT, "account", pk, GAS_LIMIT)
-            .map(|r| r.data)
-    }
-
-    /// Query the transfer-contract for the account linked to a given
-    /// public-key.
-    pub fn contract_balance(&mut self, contract_id: &ContractId) -> Result<u64, VMError> {
-        self.0
-            .call(
-                TRANSFER_CONTRACT,
-                "contract_balance",
-                contract_id,
-                GAS_LIMIT,
-            )
             .map(|r| r.data)
     }
 
@@ -209,90 +185,7 @@ impl TestSession {
         )
         .expect("Creating moonlight transaction should succeed");
 
-        let receipt = execute(&mut self.0, &transaction, &CONFIG)
-            .unwrap_or_else(|e| panic!("Unspendable transaction due to '{e}'"));
-
-        match receipt.data {
-            Ok(serialized) => Ok(CallReceipt {
-                gas_limit: receipt.gas_limit,
-                gas_spent: receipt.gas_spent,
-                events: receipt.events,
-                call_tree: receipt.call_tree,
-                data: rkyv_deserialize(&serialized),
-            }),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Calls the contract through the transfer-contract with shielded keys.
-    pub fn call_shielded_with_deposit<A, R>(
-        &mut self,
-        sender_sk: &ShieldedSecretKey,
-        input_positions: &[u64],
-        contract: ContractId,
-        fn_name: &str,
-        fn_arg: &A,
-        deposit: u64,
-    ) -> Result<CallReceipt<R>, ContractError>
-    where
-        A: for<'b> Serialize<StandardBufSerializer<'b>>,
-        A::Archived: for<'b> CheckBytes<DefaultValidator<'b>>,
-        R: Archive,
-        R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
-    {
-        let contract_call = ContractCall {
-            contract,
-            fn_name: String::from(fn_name),
-            fn_args: rkyv_serialize(fn_arg),
-        };
-
-        let sender_pk = ShieldedPublicKey::from(sender_sk);
-
-        let root = root(&mut self.0).expect("Getting the phoenix-notes root should be successful");
-
-        assert!(
-            input_positions.len() <= 4,
-            "There must not be more than 4 input notes"
-        );
-
-        let mut inputs = Vec::with_capacity(input_positions.len());
-        for pos in input_positions {
-            let leaves = leaves_from_pos(&mut self.0, *pos)
-                .expect("Getting leaves in the given range should succeed");
-            assert!(
-                !leaves.is_empty(),
-                "There should be a note at the given position"
-            );
-            let note = &leaves[0].note;
-            let opening = opening(&mut self.0, *pos)
-                .expect("Querying the opening for the given position should succeed")
-                .expect("An opening should exist for a note in the tree");
-
-            assert!(opening.verify(NoteTreeItem::new(note.hash(), ())));
-
-            inputs.push((note.clone(), opening));
-        }
-
-        let mut rng = StdRng::seed_from_u64(0xDEAD);
-
-        let transaction = Transaction::phoenix(
-            &mut rng,
-            sender_sk,
-            &sender_pk,
-            &sender_pk,
-            inputs,
-            root,
-            0,
-            true,
-            deposit,
-            GAS_LIMIT,
-            LUX,
-            CHAIN_ID,
-            Some(contract_call),
-            &LocalProver,
-        )
-        .expect("creating the creation shouldn't fail");
-
+        let _hf = host_queries::set_hard_fork(HardFork::Aegis);
         let receipt = execute(&mut self.0, &transaction, &CONFIG)
             .unwrap_or_else(|e| panic!("Unspendable transaction due to '{e}'"));
 
@@ -348,7 +241,7 @@ impl TestSession {
 
         // fund shielded keys with DUSK
         let mut rng = StdRng::seed_from_u64(0xBEEF);
-        for (pos, (&pk_to_fund, val)) in shielded_pks.iter().enumerate() {
+        for (pos, (pk_to_fund, val)) in shielded_pks.iter().enumerate() {
             let value_blinder = JubJubScalar::random(&mut rng);
             let sender_blinder = [
                 JubJubScalar::random(&mut rng),
@@ -374,12 +267,12 @@ impl TestSession {
             .expect("Updating the root should succeed");
 
         // fund public keys with DUSK
-        for (&pk_to_fund, val) in &public_pks {
+        for (pk_to_fund, val) in &public_pks {
             session
                 .call::<_, ()>(
                     TRANSFER_CONTRACT,
                     "add_account_balance",
-                    &(pk_to_fund, *val),
+                    &(**pk_to_fund, *val),
                     GAS_LIMIT,
                 )
                 .expect("Add account balance should succeed");
@@ -464,33 +357,4 @@ pub fn assert_contract_panic<R>(
     } else {
         panic!("Expected contract panic, got error: {contract_err}",);
     }
-}
-
-fn leaves_from_pos(session: &mut Session, pos: u64) -> Result<Vec<NoteLeaf>, VMError> {
-    let (feeder, receiver) = mpsc::channel();
-
-    session.feeder_call::<_, ()>(
-        TRANSFER_CONTRACT,
-        "leaves_from_pos",
-        &pos,
-        GAS_LIMIT,
-        feeder,
-    )?;
-
-    Ok(receiver
-        .iter()
-        .map(|bytes| rkyv::from_bytes(&bytes).expect("Should return leaves"))
-        .collect())
-}
-
-fn root(session: &mut Session) -> Result<BlsScalar, VMError> {
-    session
-        .call(TRANSFER_CONTRACT, "root", &(), GAS_LIMIT)
-        .map(|r| r.data)
-}
-
-fn opening(session: &mut Session, pos: u64) -> Result<Option<NoteOpening>, VMError> {
-    session
-        .call(TRANSFER_CONTRACT, "opening", &pos, GAS_LIMIT)
-        .map(|r| r.data)
 }

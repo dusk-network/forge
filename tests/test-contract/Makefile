@@ -1,5 +1,5 @@
 # =============================================================================
-# Test Bridge Contract Makefile
+# Test Contract Makefile
 # =============================================================================
 # This contract is used for testing the dusk-forge macro.
 #
@@ -81,11 +81,9 @@ all: wasm
 .PHONY: wasm
 wasm: ## Build contract WASM (optimizes if wasm-opt available)
 	@echo "Building contract WASM: $(CRATE_NAME)"
-# Contract uses -Z build-std=core,alloc to build a minimal no_std binary
-# for on-chain execution. Stack size is constrained for the VM environment.
 	@CARGO_TARGET_DIR=$(CONTRACT_TARGET_DIR) \
 		RUSTFLAGS="$(RUSTFLAGS) --remap-path-prefix $(HOME)= -C link-args=-zstack-size=$(STACK_SIZE)" \
-		cargo build -Z build-std=core,alloc \
+		cargo build \
 			--release \
 			--features $(CONTRACT_FEATURE) \
 			--color=always \
@@ -140,7 +138,7 @@ test-schema: $(DD_WASM_FILE) ## Run schema tests only
 
 .PHONY: clippy
 clippy: ## Run clippy with strict warnings
-	@cargo clippy -Z build-std=core,alloc \
+	@cargo clippy \
 		--release \
 		--features $(CONTRACT_FEATURE) \
 		--target $(WASM_TARGET) \
@@ -181,7 +179,7 @@ clean: ## Clean all build artifacts
 
 .PHONY: help
 help: ## Show this help message
-	@echo "Test Bridge Makefile - $(CRATE_NAME)"
+	@echo "Test Contract Makefile - $(CRATE_NAME)"
 	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""
