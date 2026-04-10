@@ -38,7 +38,7 @@ fn new_scaffolds_counter_template() {
     assert!(test.contains("release/my_test.wasm"));
     assert!(!test.contains("YOUR_CONTRACT_NAME"));
     assert!(!test.contains("TODO"));
-    assert!(rust_toolchain.contains("channel = \"nightly-2024-07-30\""));
+    assert!(rust_toolchain.contains("channel = \"stable\""));
 }
 
 #[test]

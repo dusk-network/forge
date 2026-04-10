@@ -45,7 +45,7 @@ rust-version = "1.85"
 # WASM Dependencies (contract is gated by #![cfg(target_family = "wasm")])
 # -----------------------------------------------------------------------------
 [target.'cfg(target_family = "wasm")'.dependencies]
-dusk-core = "1.6.0-rc.0"
+dusk-core = { version = "1.6", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0" }
 dusk-data-driver = { version = "0.3", optional = true }
 dusk-forge = "0.2.2"
 
@@ -53,8 +53,8 @@ dusk-forge = "0.2.2"
 # Dev Dependencies (for tests running on the host, not in WASM)
 # -----------------------------------------------------------------------------
 [dev-dependencies]
-dusk-core = "1.6.0-rc.0"
-dusk-vm = "1"
+dusk-core = { version = "1.6", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0" }
+dusk-vm = { version = "1.6", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0", default-features = false }
 tempfile = "3"
 
 # -----------------------------------------------------------------------------
