@@ -8,7 +8,8 @@
 
 use syn::{FnArg, ImplItem, ImplItemFn, ItemImpl, ReturnType, Type, Visibility};
 
-/// Validate that a public method has a supported signature for extern wrapper generation.
+/// Validate that a public method has a supported signature for extern wrapper
+/// generation.
 ///
 /// Returns an error if the method:
 /// - Has generic type or const parameters
@@ -267,7 +268,8 @@ pub(crate) fn init_method(
 /// Validate a method from a trait impl block.
 ///
 /// Similar to `public_method` but with trait-specific error messages.
-/// For default implementations (empty body), associated functions (no self) are allowed.
+/// For default implementations (empty body), associated functions (no self) are
+/// allowed.
 pub(crate) fn trait_method(
     method: &ImplItemFn,
     trait_name: &str,

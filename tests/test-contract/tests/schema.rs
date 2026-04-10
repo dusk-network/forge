@@ -16,7 +16,8 @@ use wasmtime::*;
 const DATA_DRIVER_WASM: &[u8] =
     include_bytes!("../../../target/data-driver/wasm32-unknown-unknown/release/test_contract.wasm");
 
-/// Load the data-driver WASM and call get_schema to retrieve the contract schema.
+/// Load the data-driver WASM and call get_schema to retrieve the contract
+/// schema.
 fn get_schema_from_wasm() -> String {
     let engine = Engine::default();
     let module = Module::new(&engine, DATA_DRIVER_WASM).expect("Failed to compile WASM");
@@ -208,7 +209,8 @@ impl DataDriverWasm {
         Self { store, instance }
     }
 
-    /// Call get_last_error to retrieve the error message after a failed operation.
+    /// Call get_last_error to retrieve the error message after a failed
+    /// operation.
     fn get_last_error(&mut self) -> String {
         let memory = self
             .instance

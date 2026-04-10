@@ -30,8 +30,7 @@ mod test_contract {
 
     use dusk_core::abi;
     use dusk_core::signatures::bls::PublicKey;
-    use types::events;
-    use types::{Item, ItemId, Ownable};
+    use types::{Item, ItemId, Ownable, events};
 
     // =========================================================================
     // Versioned trait — tests trait-exposed associated function (no self)
@@ -171,7 +170,8 @@ mod test_contract {
 
         /// Checks whether an item exists in the collection.
         ///
-        /// Exercises: reference parameter (macro receives owned value, passes `&item`).
+        /// Exercises: reference parameter (macro receives owned value, passes
+        /// `&item`).
         pub fn contains_item(&self, item: &Item) -> bool {
             self.items.contains_key(&item.id)
         }
@@ -231,11 +231,13 @@ mod test_contract {
         }
 
         /// Transfers ownership to a new public key.
-        /// Empty body signals the macro to use the trait's default implementation.
+        /// Empty body signals the macro to use the trait's default
+        /// implementation.
         fn transfer_ownership(&mut self, new_owner: PublicKey) {}
 
         /// Renounces ownership of the contract.
-        /// Empty body signals the macro to use the trait's default implementation.
+        /// Empty body signals the macro to use the trait's default
+        /// implementation.
         fn renounce_ownership(&mut self) {}
     }
 
@@ -248,7 +250,8 @@ mod test_contract {
     #[contract(expose = [version])]
     impl Versioned for TestContract {
         /// Returns the contract version.
-        /// Empty body signals the macro to use the trait's default implementation.
+        /// Empty body signals the macro to use the trait's default
+        /// implementation.
         fn version() -> String {}
     }
 

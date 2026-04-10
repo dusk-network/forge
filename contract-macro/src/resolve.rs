@@ -35,7 +35,8 @@ fn build_import_map(imports: &[ImportInfo]) -> HashMap<String, String> {
 /// Handles:
 /// - Simple types: `Deposit` -> `my_crate::Deposit`
 /// - Aliased types: `DSAddress` -> `my_crate::Address`
-/// - Multi-segment paths: `events::PauseToggled` -> `my_crate::events::PauseToggled`
+/// - Multi-segment paths: `events::PauseToggled` ->
+///   `my_crate::events::PauseToggled`
 /// - Generic types: `Option<Deposit>` -> `Option<my_crate::Deposit>`
 fn resolve_type(ty: &TokenStream2, import_map: &HashMap<String, String>) -> String {
     let ty_str = ty.to_string();
@@ -153,7 +154,8 @@ fn format_generic_args(args: &syn::PathArguments, import_map: &HashMap<String, S
     }
 }
 
-/// Resolve a path string (like `events::PauseToggled::PAUSED`) using the import map.
+/// Resolve a path string (like `events::PauseToggled::PAUSED`) using the import
+/// map.
 ///
 /// The first segment is looked up in the import map and resolved if found.
 fn resolve_path_string(path: &str, import_map: &HashMap<String, String>) -> String {
@@ -219,8 +221,9 @@ pub(crate) fn build_type_map(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use quote::quote;
+
+    use super::*;
 
     fn make_import(name: &str, path: &str) -> ImportInfo {
         ImportInfo {

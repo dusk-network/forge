@@ -92,7 +92,9 @@ pub(crate) fn schema(
 
 /// Generate the static `STATE` variable declaration.
 ///
-/// This creates a mutable static variable initialized via the contract's `new()` constructor:
+/// This creates a mutable static variable initialized via the contract's
+/// `new()` constructor:
+///
 /// ```ignore
 /// static mut STATE: ContractName = ContractName::new();
 /// ```
@@ -106,11 +108,16 @@ pub(crate) fn state_static(contract_ident: &Ident) -> TokenStream2 {
 
 /// Generate extern "C" wrapper functions for all public methods.
 ///
-/// Each wrapper deserializes input, calls the method on STATE, and serializes output.
-/// - For methods that return references, the wrapper clones the result before serialization.
-/// - For parameters that are references, the wrapper receives the owned value and passes a reference.
-/// - For trait methods with default implementations, calls the trait method via fully-qualified syntax.
-/// - For associated functions (no self), calls the function on the contract type.
+/// Each wrapper deserializes input, calls the method on STATE, and serializes
+/// output.
+/// - For methods that return references, the wrapper clones the result before
+///   serialization.
+/// - For parameters that are references, the wrapper receives the owned value
+///   and passes a reference.
+/// - For trait methods with default implementations, calls the trait method via
+///   fully-qualified syntax.
+/// - For associated functions (no self), calls the function on the contract
+///   type.
 pub(crate) fn extern_wrappers(functions: &[FunctionInfo], contract_ident: &Ident) -> TokenStream2 {
     let wrappers: Vec<_> = functions
         .iter()
@@ -208,8 +215,9 @@ pub(crate) fn extern_wrappers(functions: &[FunctionInfo], contract_ident: &Ident
 }
 
 /// Strip #[contract(...)] attributes from the impl block and its methods.
-/// For trait impl blocks, also removes empty-body methods (they're just signature stubs
-/// for wrapper generation and should use the trait's default implementation).
+/// For trait impl blocks, also removes empty-body methods (they're just
+/// signature stubs for wrapper generation and should use the trait's default
+/// implementation).
 pub(crate) fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
     let is_trait_impl = impl_block.trait_.is_some();
 
@@ -227,7 +235,8 @@ pub(crate) fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
         }
     }
 
-    // For trait impls, remove empty-body methods so they use the default implementation
+    // For trait impls, remove empty-body methods so they use the default
+    // implementation
     if is_trait_impl {
         impl_block.items.retain(|item| {
             if let ImplItem::Fn(method) = item {

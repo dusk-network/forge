@@ -1,15 +1,12 @@
-use std::{fs, path::Path, process::Command};
+use std::fs;
+use std::path::Path;
+use std::process::Command;
 
-use crate::{
-    build_runner,
-    cli::{NewArgs, TemplateChoice},
-    error::{CliError, Result},
-    template::{
-        embedded::TemplateKind,
-        engine::{render_template, validate_contract_name},
-    },
-    toolchain, ui,
-};
+use crate::cli::{NewArgs, TemplateChoice};
+use crate::error::{CliError, Result};
+use crate::template::embedded::TemplateKind;
+use crate::template::engine::{render_template, validate_contract_name};
+use crate::{build_runner, toolchain, ui};
 
 pub fn run(args: NewArgs) -> Result<()> {
     let parsed_name = validate_contract_name(&args.name)?;

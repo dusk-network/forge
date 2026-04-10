@@ -24,8 +24,10 @@ use crate::{
 ///
 /// Checks that:
 /// 1. There is at most one `abi::feed()` call site in the function
-/// 2. If `abi::feed()` is used, the `#[contract(feeds = "Type")]` attribute is present
-/// 3. If present, the feeds type matches the fed expression (tuple vs non-tuple)
+/// 2. If `abi::feed()` is used, the `#[contract(feeds = "Type")]` attribute is
+///    present
+/// 3. If present, the feeds type matches the fed expression (tuple vs
+///    non-tuple)
 ///
 /// Returns an error if validation fails.
 fn validate_feeds(
@@ -360,7 +362,8 @@ pub(crate) fn emit_calls(impl_block: &ItemImpl) -> Vec<EventInfo> {
         .collect()
 }
 
-/// Extract the `expose = [method1, method2, ...]` list from a `#[contract(...)]` attribute.
+/// Extract the `expose = [method1, method2, ...]` list from a
+/// `#[contract(...)]` attribute.
 ///
 /// Returns `None` if there's no `#[contract(expose = [...])]` attribute.
 /// Returns `Some(vec![...])` with the method names if found.
@@ -463,8 +466,9 @@ fn imports(items: &[Item]) -> Result<Vec<ImportInfo>, syn::Error> {
 
 /// Find the contract struct in the module.
 ///
-/// The module must contain exactly one `pub struct` which serves as the contract state.
-/// Returns an error if there are zero or multiple public structs.
+/// The module must contain exactly one `pub struct` which serves as the
+/// contract state. Returns an error if there are zero or multiple public
+/// structs.
 fn contract_struct<'a>(
     module: &'a ItemMod,
     items: &'a [Item],
@@ -523,7 +527,8 @@ fn impl_blocks<'a>(items: &'a [Item], contract_name: &str) -> Vec<&'a ItemImpl> 
 /// Find trait impl blocks with `#[contract(expose = [...])]` attributes.
 ///
 /// Only trait implementations that have an explicit expose list are returned.
-/// The expose list specifies which trait methods should have extern wrappers generated.
+/// The expose list specifies which trait methods should have extern wrappers
+/// generated.
 fn trait_impls<'a>(items: &'a [Item], contract_name: &str) -> Vec<TraitImplInfo<'a>> {
     items
         .iter()
@@ -575,7 +580,8 @@ fn custom_data_driver_handlers(items: &[Item]) -> Vec<CustomDataDriverHandler> {
                 continue;
             };
 
-            // Parse: encode_input = "fn_name", decode_input = "fn_name", or decode_output = "fn_name"
+            // Parse: encode_input = "fn_name", decode_input = "fn_name", or decode_output =
+            // "fn_name"
             let tokens = meta.tokens.clone();
             let mut iter = tokens.into_iter().peekable();
 
@@ -625,7 +631,8 @@ fn custom_data_driver_handlers(items: &[Item]) -> Vec<CustomDataDriverHandler> {
 /// Check if an item is a custom data-driver handler function.
 ///
 /// Returns true if the item has a `#[contract(encode_input = ...)]`,
-/// `#[contract(decode_input = ...)]`, or `#[contract(decode_output = ...)]` attribute.
+/// `#[contract(decode_input = ...)]`, or `#[contract(decode_output = ...)]`
+/// attribute.
 pub(crate) fn is_custom_handler(item: &Item) -> bool {
     let Item::Fn(func) = item else {
         return false;

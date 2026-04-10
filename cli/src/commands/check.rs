@@ -1,9 +1,7 @@
-use crate::{
-    cli::ProjectOptions,
-    error::{CliError, Result},
-    project::{detect, metadata},
-    toolchain, ui,
-};
+use crate::cli::ProjectOptions;
+use crate::error::{CliError, Result};
+use crate::project::{detect, metadata};
+use crate::{toolchain, ui};
 
 pub fn run(args: ProjectOptions) -> Result<()> {
     let project = metadata::load(&args.path)?;

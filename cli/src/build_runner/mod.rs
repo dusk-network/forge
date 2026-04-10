@@ -1,18 +1,14 @@
 pub mod wasm_opt;
 
-use std::{
-    env,
-    ffi::OsStr,
-    path::{Path, PathBuf},
-    process::{Command, Stdio},
-};
+use std::env;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
-use crate::{
-    error::{CliError, Result},
-    project::detect,
-    project::metadata::ProjectMetadata,
-    toolchain::{self, WASM_TARGET},
-};
+use crate::error::{CliError, Result};
+use crate::project::detect;
+use crate::project::metadata::ProjectMetadata;
+use crate::toolchain::{self, WASM_TARGET};
 
 const CONTRACT_FEATURE: &str = "contract";
 const STACK_SIZE: u32 = 65_536;

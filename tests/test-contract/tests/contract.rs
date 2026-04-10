@@ -13,8 +13,7 @@
 
 extern crate alloc;
 
-use std::sync::LazyLock;
-use std::sync::mpsc;
+use std::sync::{LazyLock, mpsc};
 
 use dusk_core::abi::ContractId;
 use dusk_core::dusk;
@@ -22,12 +21,10 @@ use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as Acc
 use dusk_vm::CallReceipt;
 mod test_session;
 
-use test_session::TestSession;
-
-use types::{Item, ItemId};
-
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use test_session::TestSession;
+use types::{Item, ItemId};
 
 const DEPLOYER: [u8; 64] = [0u8; 64];
 

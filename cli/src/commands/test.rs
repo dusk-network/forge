@@ -1,12 +1,10 @@
 use std::process::{Command, Stdio};
 
-use crate::{
-    build_runner::{self, BuildTarget},
-    cli::TestArgs,
-    error::{CliError, Result},
-    project::{detect, metadata},
-    toolchain, ui,
-};
+use crate::build_runner::{self, BuildTarget};
+use crate::cli::TestArgs;
+use crate::error::{CliError, Result};
+use crate::project::{detect, metadata};
+use crate::{toolchain, ui};
 
 pub fn run(args: TestArgs) -> Result<()> {
     let project = metadata::load(&args.project.path)?;

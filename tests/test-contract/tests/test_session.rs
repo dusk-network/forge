@@ -22,14 +22,13 @@ use dusk_core::{JubJubScalar, LUX};
 use dusk_vm::host_queries::{self, HardFork};
 use dusk_vm::{CallReceipt, ContractData, Error as VMError, ExecutionConfig, Session, VM, execute};
 use ff::Field;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use rkyv::bytecheck::CheckBytes;
 use rkyv::ser::Serializer;
 use rkyv::ser::serializers::{BufferScratch, BufferSerializer, CompositeSerializer};
 use rkyv::validation::validators::DefaultValidator;
 use rkyv::{Archive, Deserialize, Infallible, Serialize, check_archived_root};
-
-use rand::SeedableRng;
-use rand::rngs::StdRng;
 
 const ZERO_ADDRESS: ContractId = ContractId::from_bytes([0; CONTRACT_ID_BYTES]);
 const GAS_LIMIT: u64 = 0x10_000_000;

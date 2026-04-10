@@ -1,13 +1,10 @@
 use std::process::{Command, Stdio};
 
-use crate::{
-    build_runner,
-    cli::ExpandArgs,
-    error::{CliError, Result},
-    project::{detect, metadata},
-    toolchain::{self, WASM_TARGET},
-    tools, ui,
-};
+use crate::cli::ExpandArgs;
+use crate::error::{CliError, Result};
+use crate::project::{detect, metadata};
+use crate::toolchain::{self, WASM_TARGET};
+use crate::{build_runner, tools, ui};
 
 pub fn run(args: ExpandArgs) -> Result<()> {
     let project = metadata::load(&args.project.path)?;

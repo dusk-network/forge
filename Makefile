@@ -1,6 +1,6 @@
 # Workspace Makefile for dusk-forge
 
-.PHONY: all test test-unit test-integration clippy fmt clean help
+.PHONY: all test test-unit test-integration clippy cq fmt check doc clean help
 
 all: test
 
@@ -14,8 +14,19 @@ test-unit: ## Run unit tests
 test-integration: ## Run integration tests (test-contract)
 	@$(MAKE) -C tests/test-contract test
 
-fmt: ## Format all Rust source files
-	@cargo fmt --all
+fmt: ## Format code (requires nightly)
+	@rustup component add --toolchain nightly rustfmt 2>/dev/null || true
+	@cargo +nightly fmt --all $(if $(CHECK),-- --check,)
+
+check: ## Run cargo check on all targets
+	@cargo check --all-targets
+
+doc: ## Generate documentation
+	@cargo doc --no-deps
+
+cq: ## Run code quality checks (formatting + clippy)
+	@$(MAKE) fmt CHECK=1
+	@$(MAKE) clippy
 
 clippy: ## Run clippy on all workspace members
 	@echo "Running clippy..."
