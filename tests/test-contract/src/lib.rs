@@ -74,6 +74,10 @@ mod test_contract {
         }
 
         /// Initializes the contract with an owner.
+        ///
+        /// This method intentionally doesn't emit an event as it's only called
+        /// during contract deployment.
+        #[contract(no_event)]
         pub fn init(&mut self, owner: PublicKey) {
             self.owner = Some(owner);
         }
@@ -216,7 +220,9 @@ mod test_contract {
     /// contract functions; `owner_mut` and `only_owner` remain internal.
     ///
     /// Empty method bodies signal the macro to use the trait's default
-    /// implementations.
+    /// implementations. The `emits` attribute on methods registers events
+    /// that are emitted by trait default implementations (not visible in
+    /// the impl block body).
     #[contract(expose = [owner, transfer_ownership, renounce_ownership])]
     #[allow(clippy::unused_self, clippy::needless_pass_by_value)]
     impl Ownable for TestContract {
@@ -233,11 +239,13 @@ mod test_contract {
         /// Transfers ownership to a new public key.
         /// Empty body signals the macro to use the trait's default
         /// implementation.
+        #[contract(emits = [(events::OwnershipTransferred::TRANSFERRED, events::OwnershipTransferred)])]
         fn transfer_ownership(&mut self, new_owner: PublicKey) {}
 
         /// Renounces ownership of the contract.
         /// Empty body signals the macro to use the trait's default
         /// implementation.
+        #[contract(emits = [(events::OwnershipTransferred::RENOUNCED, events::OwnershipTransferred)])]
         fn renounce_ownership(&mut self) {}
     }
 
