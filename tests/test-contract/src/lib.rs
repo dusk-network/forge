@@ -30,7 +30,7 @@ mod test_contract {
 
     use dusk_core::abi;
     use dusk_core::signatures::bls::PublicKey;
-    use types::{Item, ItemId, Ownable, events};
+    use types::{Item, ItemId, Ownable, events, helpers};
 
     // =========================================================================
     // Versioned trait — tests trait-exposed associated function (no self)
@@ -142,6 +142,18 @@ mod test_contract {
         /// Exercises: associated function (no self).
         pub fn empty_id() -> ItemId {
             ItemId(0)
+        }
+
+        /// Bumps the tally by delegating to a free helper function.
+        ///
+        /// Exercises `#[contract(emits = [...])]` on an inherent method: the
+        /// actual `abi::emit` call lives in `helpers::emit_tally_bumped`,
+        /// outside any contract impl block, so the macro's body scanner
+        /// cannot see it.
+        #[contract(emits = [(events::TallyBumped::TOPIC, events::TallyBumped)])]
+        pub fn bump_tally(&mut self) {
+            self.counter += 1;
+            helpers::emit_tally_bumped();
         }
     }
 

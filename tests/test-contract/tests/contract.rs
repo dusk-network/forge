@@ -118,6 +118,12 @@ impl TestContractSession {
             .expect("renounce_ownership should succeed")
     }
 
+    fn bump_tally(&mut self, sender_sk: &AccountSecretKey) -> CallReceipt<()> {
+        self.session
+            .call_public(sender_sk, CONTRACT_ID, "bump_tally", &())
+            .expect("bump_tally should succeed")
+    }
+
     // Mutating methods
 
     fn set_counter(&mut self, sender_sk: &AccountSecretKey, value: u64) -> CallReceipt<()> {
@@ -245,6 +251,25 @@ fn test_renounce_ownership() {
     assert!(
         !receipt.events.is_empty(),
         "renounce_ownership should emit an event"
+    );
+}
+
+/// `bump_tally` is an inherent method with `#[contract(emits = [...])]`; the
+/// actual `abi::emit` call happens in `emit_tally_bumped`, a free helper
+/// outside any contract impl block, so it is invisible to the macro's body
+/// scanner. Verify the call still succeeds and the delegated event is
+/// emitted at runtime.
+#[test]
+fn test_delegating_inherent_method_emits_event() {
+    let mut session = TestContractSession::new();
+
+    let receipt = session.bump_tally(&OWNER_SK);
+
+    let tally_event = receipt.events.iter().find(|e| e.topic == "tally_bumped");
+    assert!(
+        tally_event.is_some(),
+        "bump_tally should emit tally_bumped via helper; got: {:?}",
+        receipt.events
     );
 }
 

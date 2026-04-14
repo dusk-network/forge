@@ -157,6 +157,34 @@ fn test_schema_has_events() {
     );
 }
 
+/// Verify that `#[contract(emits = [...])]` on an inherent method registers
+/// events emitted by a helper outside the impl block.
+///
+/// `bump_tally` is an inherent method that delegates to `emit_tally_bumped`,
+/// a free function where the actual `abi::emit` call lives. The macro's body
+/// scanner cannot see that call, so the author declares the event via
+/// `emits`. The registered event must appear in the schema.
+#[test]
+fn test_schema_has_delegated_inherent_event() {
+    let schema_json = get_schema_from_wasm();
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
+
+    let events = schema["events"]
+        .as_array()
+        .expect("events should be an array");
+    let event_topics: Vec<&str> = events
+        .iter()
+        .map(|e| e["topic"].as_str().unwrap())
+        .collect();
+
+    assert!(
+        event_topics.iter().any(|t| t.contains("TallyBumped")),
+        "missing TallyBumped event from inherent emits attribute; \
+         topics: {event_topics:?}"
+    );
+}
+
 /// Verify that manually registered events via `#[contract(emits = [...])]`
 /// appear in the schema.
 ///
