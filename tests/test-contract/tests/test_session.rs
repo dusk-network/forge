@@ -50,7 +50,6 @@ const CONFIG: ExecutionConfig = ExecutionConfig {
 /// like a mainnet VM.
 pub struct TestSession(pub Session);
 
-#[allow(dead_code)]
 impl TestSession {
     /// Passes the call to deploy bytecode of a contract to the
     /// underlying session with maximum gas limit.
@@ -77,53 +76,6 @@ impl TestSession {
         self.0
             .call(TRANSFER_CONTRACT, "account", pk, GAS_LIMIT)
             .map(|r| r.data)
-    }
-
-    /// Directly calls the contract, circumventing the transfer contract and
-    /// (among other things) also any gas-payment.
-    pub fn direct_call<A, R>(
-        &mut self,
-        contract: ContractId,
-        fn_name: &str,
-        fn_arg: &A,
-    ) -> Result<CallReceipt<R>, ContractError>
-    where
-        A: for<'b> Serialize<StandardBufSerializer<'b>>,
-        A::Archived: for<'b> CheckBytes<DefaultValidator<'b>>,
-        R: Archive,
-        R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
-    {
-        self.0
-            .call::<_, R>(contract, fn_name, fn_arg, u64::MAX)
-            .map_err(|e| match e {
-                VMError::Panic(panic_msg) => ContractError::Panic(panic_msg),
-                VMError::OutOfGas => ContractError::OutOfGas,
-                _ => panic!("Unknown error: {e}"),
-            })
-    }
-
-    /// Feeder calls are used to have the contract be able to report larger
-    /// amounts of data to the host via the channel included in this call.
-    pub fn feeder_call<A, R>(
-        &mut self,
-        contract: ContractId,
-        fn_name: &str,
-        fn_arg: &A,
-        feeder: std::sync::mpsc::Sender<Vec<u8>>,
-    ) -> Result<CallReceipt<R>, ContractError>
-    where
-        A: for<'b> Serialize<StandardBufSerializer<'b>>,
-        A::Archived: for<'b> CheckBytes<DefaultValidator<'b>>,
-        R: Archive,
-        R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
-    {
-        self.0
-            .feeder_call::<_, R>(contract, fn_name, fn_arg, u64::MAX, feeder)
-            .map_err(|e| match e {
-                VMError::Panic(panic_msg) => ContractError::Panic(panic_msg),
-                VMError::OutOfGas => ContractError::OutOfGas,
-                _ => panic!("Unknown error: {e}"),
-            })
     }
 
     /// Calls the contract through the transfer-contract which is the standard
@@ -336,24 +288,4 @@ where
     let pos = ser.pos();
 
     buffer[..pos].to_vec()
-}
-
-#[allow(dead_code)]
-pub fn assert_contract_panic<R>(
-    call_result: Result<CallReceipt<R>, ContractError>,
-    expected_panic: &str,
-) where
-    R: Archive,
-    R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
-{
-    let contract_err = match call_result {
-        Ok(_) => panic!("Contract call shouldn't pass"),
-        Err(error) => error,
-    };
-
-    if let ContractError::Panic(panic_msg) = contract_err {
-        assert_eq!(panic_msg, expected_panic);
-    } else {
-        panic!("Expected contract panic, got error: {contract_err}",);
-    }
 }

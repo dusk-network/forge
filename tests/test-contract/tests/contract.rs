@@ -15,16 +15,72 @@ extern crate alloc;
 
 use std::sync::{LazyLock, mpsc};
 
-use dusk_core::abi::ContractId;
+use dusk_core::abi::{ContractError, ContractId, StandardBufSerializer};
 use dusk_core::dusk;
 use dusk_core::signatures::bls::{PublicKey as AccountPublicKey, SecretKey as AccountSecretKey};
-use dusk_vm::CallReceipt;
+use dusk_vm::{CallReceipt, Error as VMError};
+use rkyv::bytecheck::CheckBytes;
+use rkyv::validation::validators::DefaultValidator;
+use rkyv::{Archive, Deserialize, Infallible, Serialize};
 mod test_session;
 
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use test_session::TestSession;
 use types::{Item, ItemId};
+
+/// Direct/feeder call helpers used only by this test binary.
+///
+/// Lives here (not in `test_session.rs`) so the schema test binary, which
+/// only needs the public-call path, doesn't trip a `dead_code` warning.
+impl TestSession {
+    /// Directly calls the contract, circumventing the transfer contract and
+    /// (among other things) also any gas-payment.
+    fn direct_call<A, R>(
+        &mut self,
+        contract: ContractId,
+        fn_name: &str,
+        fn_arg: &A,
+    ) -> Result<CallReceipt<R>, ContractError>
+    where
+        A: for<'b> Serialize<StandardBufSerializer<'b>>,
+        A::Archived: for<'b> CheckBytes<DefaultValidator<'b>>,
+        R: Archive,
+        R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
+    {
+        self.0
+            .call::<_, R>(contract, fn_name, fn_arg, u64::MAX)
+            .map_err(|e| match e {
+                VMError::Panic(panic_msg) => ContractError::Panic(panic_msg),
+                VMError::OutOfGas => ContractError::OutOfGas,
+                _ => panic!("Unknown error: {e}"),
+            })
+    }
+
+    /// Feeder calls let the contract report larger amounts of data to the
+    /// host via the channel included in this call.
+    fn feeder_call<A, R>(
+        &mut self,
+        contract: ContractId,
+        fn_name: &str,
+        fn_arg: &A,
+        feeder: std::sync::mpsc::Sender<Vec<u8>>,
+    ) -> Result<CallReceipt<R>, ContractError>
+    where
+        A: for<'b> Serialize<StandardBufSerializer<'b>>,
+        A::Archived: for<'b> CheckBytes<DefaultValidator<'b>>,
+        R: Archive,
+        R::Archived: Deserialize<R, Infallible> + for<'b> CheckBytes<DefaultValidator<'b>>,
+    {
+        self.0
+            .feeder_call::<_, R>(contract, fn_name, fn_arg, u64::MAX, feeder)
+            .map_err(|e| match e {
+                VMError::Panic(panic_msg) => ContractError::Panic(panic_msg),
+                VMError::OutOfGas => ContractError::OutOfGas,
+                _ => panic!("Unknown error: {e}"),
+            })
+    }
+}
 
 const DEPLOYER: [u8; 64] = [0u8; 64];
 
