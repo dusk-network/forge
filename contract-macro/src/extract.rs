@@ -275,12 +275,13 @@ pub(crate) fn public_methods(impl_block: &ItemImpl) -> Result<Vec<FunctionInfo>,
             let receiver = extract_receiver(method);
             let has_emit_call = method_has_emit_call(method);
             let suppressed = event_suppressed(&method.attrs);
+            let has_method_emits = !method_emits(&method.attrs).is_empty();
 
             // Validate feed-related attributes
             validate_feeds(method, &name, feed_type.as_ref())?;
 
             // Validate that mutating methods emit events
-            validate::method_emits_event(method, has_emit_call, suppressed, false)?;
+            validate::method_emits_event(method, has_emit_call, suppressed, has_method_emits)?;
 
             // Extract parameters (name and type)
             let params = parameters(method);
@@ -428,28 +429,44 @@ pub(crate) fn method_emits(attrs: &[Attribute]) -> Vec<EventInfo> {
         .unwrap_or_default()
 }
 
+/// Collect events from method-level `#[contract(emits = [...])]` attributes
+/// on the methods of an impl block, restricted to those matching `include`.
+fn impl_method_emits<F>(impl_block: &ItemImpl, mut include: F) -> Vec<EventInfo>
+where
+    F: FnMut(&ImplItemFn) -> bool,
+{
+    let mut events = Vec::new();
+    for item in &impl_block.items {
+        if let ImplItem::Fn(method) = item
+            && include(method)
+        {
+            events.extend(method_emits(&method.attrs));
+        }
+    }
+    events
+}
+
 /// Extract events from method-level `#[contract(emits = [...])]` attributes in
 /// a trait impl.
 ///
 /// Only methods in the `expose_list` are checked for emits attributes.
 pub(crate) fn trait_method_emits(trait_impl: &TraitImplInfo) -> Vec<EventInfo> {
-    let mut events = Vec::new();
+    impl_method_emits(trait_impl.impl_block, |method| {
+        trait_impl
+            .expose_list
+            .contains(&method.sig.ident.to_string())
+    })
+}
 
-    for item in &trait_impl.impl_block.items {
-        if let ImplItem::Fn(method) = item {
-            let method_name = method.sig.ident.to_string();
-
-            // Only process methods in the expose list
-            if !trait_impl.expose_list.contains(&method_name) {
-                continue;
-            }
-
-            // Extract events from method's emits attribute
-            events.extend(method_emits(&method.attrs));
-        }
-    }
-
-    events
+/// Extract events from method-level `#[contract(emits = [...])]` attributes in
+/// an inherent impl block.
+///
+/// Only public methods (excluding `new`) are checked, matching the set of
+/// methods exposed as contract functions by [`public_methods`].
+pub(crate) fn inherent_method_emits(impl_block: &ItemImpl) -> Vec<EventInfo> {
+    impl_method_emits(impl_block, |method| {
+        matches!(method.vis, Visibility::Public(_)) && method.sig.ident != "new"
+    })
 }
 
 /// Extract the `expose = [method1, method2, ...]` list from a
@@ -1096,6 +1113,87 @@ mod tests {
         assert!(result.is_ok());
         let functions = result.unwrap();
         assert_eq!(functions.len(), 2);
+    }
+
+    #[test]
+    fn test_public_methods_delegating_with_emits() {
+        // Inherent method with an emit-free body but an `emits` attribute
+        // (delegates to a helper) — the new strict check must accept it.
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                #[contract(emits = [(Resolved::TOPIC, Resolved)])]
+                pub fn resolve(&mut self) {
+                    self.core.resolve();
+                }
+            }
+        };
+        let functions = match public_methods(&impl_block) {
+            Ok(functions) => functions,
+            Err(err) => panic!("expected success, got: {err}"),
+        };
+        assert_eq!(functions.len(), 1);
+        assert_eq!(functions[0].name.to_string(), "resolve");
+    }
+
+    #[test]
+    fn test_public_methods_delegating_without_emits_errors() {
+        // Same shape without the `emits` attribute must still fail the strict
+        // mutating-method check.
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn resolve(&mut self) {
+                    self.core.resolve();
+                }
+            }
+        };
+        let Err(err) = public_methods(&impl_block) else {
+            panic!("expected error for delegating method without emits");
+        };
+        assert!(err.to_string().contains("emits no events"));
+    }
+
+    #[test]
+    fn test_trait_method_emits_collects_events() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            #[contract(expose = [transfer_ownership])]
+            impl OwnableTrait for MyContract {
+                #[contract(emits = [(Transferred::TOPIC, Transferred)])]
+                fn transfer_ownership(&mut self) {}
+
+                // Not in expose list — should be ignored even with emits.
+                #[contract(emits = [(Hidden::TOPIC, Hidden)])]
+                fn unexposed(&mut self) {}
+            }
+        };
+        let trait_impl = TraitImplInfo {
+            trait_name: "OwnableTrait".to_string(),
+            impl_block: &impl_block,
+            expose_list: vec!["transfer_ownership".to_string()],
+        };
+        let events = trait_method_emits(&trait_impl);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].topic, "Transferred::TOPIC");
+    }
+
+    #[test]
+    fn test_inherent_method_emits_collects_events() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                #[contract(emits = [(Resolved::TOPIC, Resolved)])]
+                pub fn resolve(&mut self) { self.core.resolve(); }
+
+                // Private method — should be ignored.
+                #[contract(emits = [(Hidden::TOPIC, Hidden)])]
+                fn private_helper(&mut self) { self.core.hidden(); }
+
+                // Constructor — should be ignored even if it carries emits.
+                #[contract(emits = [(New::TOPIC, New)])]
+                pub fn new() -> Self { Self }
+            }
+        };
+        let events = inherent_method_emits(&impl_block);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].topic, "Resolved::TOPIC");
     }
 
     #[test]

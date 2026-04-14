@@ -528,6 +528,8 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
             Err(e) => return e.to_compile_error().into(),
         }
         events.extend(extract::emit_calls(impl_block));
+        // Include events from method-level #[contract(emits = [...])] attributes
+        events.extend(extract::inherent_method_emits(impl_block));
     }
 
     // Extract functions and events from trait impl blocks with expose lists
