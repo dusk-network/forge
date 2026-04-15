@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `#[contract(emits = [...])]` method-level attribute for manual event registration, covering both trait impls with default implementations and inherent methods that delegate to helpers in other crates.
+- Add compile error when a public `&mut self` method emits no events. Suppress with `#[contract(no_event)]`.
+- Add detection of variable identifiers used as `abi::emit()` topics (warning pending `proc_macro_diagnostic` stabilisation).
 - Add the `dusk-forge` CLI with `new`, `build`, `test`, and `check` commands for contract project scaffolding and workflows.
 - Add `expand`, `clean`, and `completions` commands to the `dusk-forge` CLI.
 - Add `schema`, `call`, and `verify` commands to the `dusk-forge` CLI.

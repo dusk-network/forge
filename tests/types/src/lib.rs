@@ -102,6 +102,23 @@ pub trait Ownable {
 }
 
 // =========================================================================
+// Helpers module
+// =========================================================================
+
+/// Free helper functions that emit events from outside any contract impl
+/// block. Used by the test contract to exercise `#[contract(emits = [...])]`
+/// on inherent methods that delegate work to non-contract code.
+#[cfg(feature = "abi")]
+pub mod helpers {
+    use crate::events;
+
+    /// Emits an [`events::TallyBumped`] event.
+    pub fn emit_tally_bumped() {
+        dusk_core::abi::emit(events::TallyBumped::TOPIC, events::TallyBumped());
+    }
+}
+
+// =========================================================================
 // Events module
 // =========================================================================
 
@@ -141,6 +158,7 @@ pub mod events {
 
     /// Event emitted when ownership is transferred or renounced.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[archive_attr(derive(CheckBytes))]
     pub struct OwnershipTransferred {
         /// The previous owner.
@@ -164,6 +182,17 @@ pub mod events {
         pub const ADDED: &'static str = "item_added";
         /// Event topic for removing an item.
         pub const REMOVED: &'static str = "item_removed";
+    }
+
+    /// Event emitted by [`super::helpers::emit_tally_bumped`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
+    #[archive_attr(derive(CheckBytes))]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    pub struct TallyBumped();
+
+    impl TallyBumped {
+        /// Event topic for tally bumps.
+        pub const TOPIC: &'static str = "tally_bumped";
     }
 
     /// Event emitted when the contract is updated with new counter and label.

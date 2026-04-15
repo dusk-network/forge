@@ -15,9 +15,9 @@ use syn::{
 
 use crate::{
     ContractData, CustomDataDriverHandler, DataDriverRole, EmitVisitor, EventInfo, FunctionInfo,
-    ImportInfo, ParameterInfo, TraitImplInfo, extract_doc_comment, extract_feeds_attribute,
-    extract_receiver, get_feed_exprs, has_custom_attribute, has_empty_body, parse, validate,
-    validate_feed_type_match,
+    ImportInfo, ParameterInfo, TraitImplInfo, event_suppressed, extract_doc_comment,
+    extract_feeds_attribute, extract_receiver, get_feed_exprs, has_custom_attribute,
+    has_empty_body, parse, validate, validate_feed_type_match,
 };
 
 /// Validate feed-related attributes for a method.
@@ -75,28 +75,48 @@ fn validate_feeds(
 }
 
 /// Extract topic string from the first argument of `abi::emit()`.
+///
 /// Handles both string literals and const path expressions.
+/// Detects when a lowercase single-segment path (likely a variable) is used as
+/// a topic, since the macro can only capture the variable name, not its value.
 pub(crate) fn topic_from_expr(expr: &Expr) -> Option<String> {
     match expr {
         // String literal: "topic_name"
         Expr::Lit(ExprLit {
             lit: Lit::Str(s), ..
         }) => Some(s.value()),
-        // Path expression: Type::TOPIC or module::Type::TOPIC
+        // Path expression: Type::TOPIC or module::Type::TOPIC or variable
         Expr::Path(path) => {
-            // Convert the path to a string representation
-            Some(
-                path.path
-                    .segments
-                    .iter()
-                    .map(|s| s.ident.to_string())
-                    .collect::<Vec<_>>()
-                    .join("::"),
-            )
+            let segments: Vec<_> = path
+                .path
+                .segments
+                .iter()
+                .map(|s| s.ident.to_string())
+                .collect();
+
+            // Single lowercase identifier is likely a variable, not a const.
+            // e.g., `let topic = "foo"; abi::emit(topic, data);` — we can only
+            // capture "topic" as the schema topic, not its runtime value.
+            if segments.len() == 1 {
+                let first_char = segments[0].chars().next();
+                if first_char.is_some_and(char::is_lowercase) {
+                    emit_variable_topic_warning(&segments[0]);
+                }
+            }
+
+            Some(segments.join("::"))
         }
         _ => None,
     }
 }
+
+/// Emit a warning when a variable is used as an event topic.
+///
+/// Currently a no-op: `proc_macro::Diagnostic` requires nightly
+/// (`proc_macro_diagnostic`). The detection logic in `topic_from_expr`
+/// still identifies variable topics and unit tests verify the behaviour;
+/// the warning can be enabled once the feature stabilises.
+fn emit_variable_topic_warning(_name: &str) {}
 
 /// Attempt to extract a type from an expression.
 /// This handles common patterns like `Type { .. }`, `Type()`, `Type::new()`.
@@ -155,11 +175,28 @@ pub(crate) fn trait_methods(trait_impl: &TraitImplInfo) -> Result<Vec<FunctionIn
             let feed_type = extract_feeds_attribute(&method.attrs);
             let receiver = extract_receiver(method);
 
+            // Check for method-level emits attribute
+            let method_events = method_emits(&method.attrs);
+            let has_method_emits = !method_events.is_empty();
+
+            // For trait methods:
+            // - Default impl (empty body): check if emits attribute registered on method
+            // - Non-default impl: check body for emit calls
+            let has_emit_call = if is_default_impl {
+                has_method_emits
+            } else {
+                method_has_emit_call(method)
+            };
+            let suppressed = event_suppressed(&method.attrs);
+
             // Validate feed-related attributes
             // (only check non-empty bodies since empty bodies delegate to trait defaults)
             if !is_default_impl {
                 validate_feeds(method, &name, feed_type.as_ref())?;
             }
+
+            // Validate that mutating methods emit events
+            validate::method_emits_event(method, has_emit_call, suppressed, has_method_emits)?;
 
             // Extract parameters (name and type)
             let params = parameters(method);
@@ -236,9 +273,15 @@ pub(crate) fn public_methods(impl_block: &ItemImpl) -> Result<Vec<FunctionInfo>,
             let is_custom = has_custom_attribute(&method.attrs);
             let feed_type = extract_feeds_attribute(&method.attrs);
             let receiver = extract_receiver(method);
+            let has_emit_call = method_has_emit_call(method);
+            let suppressed = event_suppressed(&method.attrs);
+            let has_method_emits = !method_emits(&method.attrs).is_empty();
 
             // Validate feed-related attributes
             validate_feeds(method, &name, feed_type.as_ref())?;
+
+            // Validate that mutating methods emit events
+            validate::method_emits_event(method, has_emit_call, suppressed, has_method_emits)?;
 
             // Extract parameters (name and type)
             let params = parameters(method);
@@ -362,6 +405,70 @@ pub(crate) fn emit_calls(impl_block: &ItemImpl) -> Vec<EventInfo> {
         .collect()
 }
 
+/// Check if a method body contains any `abi::emit()` call.
+pub(crate) fn method_has_emit_call(method: &ImplItemFn) -> bool {
+    use syn::visit::Visit;
+
+    let mut visitor = EmitVisitor::new();
+    visitor.visit_block(&method.block);
+    !visitor.events.is_empty()
+}
+
+/// Extract events from a method's `#[contract(emits = [...])]` attribute.
+///
+/// Returns the events registered on this specific method, or an empty vec if
+/// none.
+pub(crate) fn method_emits(attrs: &[Attribute]) -> Vec<EventInfo> {
+    emits_list(attrs)
+        .map(|events| {
+            events
+                .into_iter()
+                .map(|(topic, data_type)| crate::EventInfo { topic, data_type })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Collect events from method-level `#[contract(emits = [...])]` attributes
+/// on the methods of an impl block, restricted to those matching `include`.
+fn impl_method_emits<F>(impl_block: &ItemImpl, mut include: F) -> Vec<EventInfo>
+where
+    F: FnMut(&ImplItemFn) -> bool,
+{
+    let mut events = Vec::new();
+    for item in &impl_block.items {
+        if let ImplItem::Fn(method) = item
+            && include(method)
+        {
+            events.extend(method_emits(&method.attrs));
+        }
+    }
+    events
+}
+
+/// Extract events from method-level `#[contract(emits = [...])]` attributes in
+/// a trait impl.
+///
+/// Only methods in the `expose_list` are checked for emits attributes.
+pub(crate) fn trait_method_emits(trait_impl: &TraitImplInfo) -> Vec<EventInfo> {
+    impl_method_emits(trait_impl.impl_block, |method| {
+        trait_impl
+            .expose_list
+            .contains(&method.sig.ident.to_string())
+    })
+}
+
+/// Extract events from method-level `#[contract(emits = [...])]` attributes in
+/// an inherent impl block.
+///
+/// Only public methods (excluding `new`) are checked, matching the set of
+/// methods exposed as contract functions by [`public_methods`].
+pub(crate) fn inherent_method_emits(impl_block: &ItemImpl) -> Vec<EventInfo> {
+    impl_method_emits(impl_block, |method| {
+        matches!(method.vis, Visibility::Public(_)) && method.sig.ident != "new"
+    })
+}
+
 /// Extract the `expose = [method1, method2, ...]` list from a
 /// `#[contract(...)]` attribute.
 ///
@@ -418,6 +525,156 @@ pub(crate) fn expose_list(attrs: &[Attribute]) -> Option<Vec<String>> {
     }
 
     None
+}
+
+/// Extract the `emits = [(topic, Type), ...]` list from a `#[contract(...)]`
+/// attribute.
+///
+/// Returns `None` if there's no `#[contract(emits = [...])]` attribute.
+/// Returns `Some(vec![...])` with (topic, `data_type`) pairs if found.
+///
+/// Supports two topic formats:
+/// - Const path: `(events::OwnershipTransferred::TOPIC,
+///   events::OwnershipTransferred)`
+/// - String literal: `("my_topic", MyEventType)`
+pub(crate) fn emits_list(attrs: &[Attribute]) -> Option<Vec<(String, TokenStream2)>> {
+    for attr in attrs {
+        if !attr.path().is_ident("contract") {
+            continue;
+        }
+
+        let Ok(meta) = attr.meta.require_list() else {
+            continue;
+        };
+
+        // Parse the token stream to find emits = [...]
+        let tokens = meta.tokens.clone();
+        let mut iter = tokens.into_iter().peekable();
+
+        // Look through all tokens for "emits"
+        while let Some(token) = iter.next() {
+            let proc_macro2::TokenTree::Ident(ident) = token else {
+                continue;
+            };
+
+            if ident != "emits" {
+                continue;
+            }
+
+            // Expect "="
+            let Some(proc_macro2::TokenTree::Punct(punct)) = iter.next() else {
+                continue;
+            };
+            if punct.as_char() != '=' {
+                continue;
+            }
+
+            // Expect "[...]"
+            let Some(proc_macro2::TokenTree::Group(group)) = iter.next() else {
+                continue;
+            };
+            if group.delimiter() != proc_macro2::Delimiter::Bracket {
+                continue;
+            }
+
+            // Parse the event tuples from the group
+            return Some(parse_emits_tuples(group.stream()));
+        }
+    }
+
+    None
+}
+
+/// Parse the contents of `emits = [...]` into a list of (topic, `data_type`)
+/// pairs.
+fn parse_emits_tuples(stream: proc_macro2::TokenStream) -> Vec<(String, TokenStream2)> {
+    let mut events = Vec::new();
+
+    for token in stream {
+        // Each event is a group: (topic, Type)
+        let proc_macro2::TokenTree::Group(group) = token else {
+            continue;
+        };
+        if group.delimiter() != proc_macro2::Delimiter::Parenthesis {
+            continue;
+        }
+
+        if let Some((topic, data_type)) = parse_event_tuple(group.stream()) {
+            events.push((topic, data_type));
+        }
+    }
+
+    events
+}
+
+/// Parse a single event tuple: (topic, Type).
+fn parse_event_tuple(stream: proc_macro2::TokenStream) -> Option<(String, TokenStream2)> {
+    let mut iter = stream.into_iter().peekable();
+
+    // Extract topic (everything before the comma)
+    let topic = extract_topic_from_tokens(&mut iter)?;
+
+    // Skip the comma
+    while let Some(token) = iter.peek() {
+        if let proc_macro2::TokenTree::Punct(p) = token
+            && p.as_char() == ','
+        {
+            iter.next();
+            break;
+        }
+        iter.next();
+    }
+
+    // Remaining tokens are the data type
+    let data_type: TokenStream2 = iter.collect();
+    if data_type.is_empty() {
+        return None;
+    }
+
+    Some((topic, data_type))
+}
+
+/// Extract the topic string from the tokens before the comma.
+fn extract_topic_from_tokens(
+    iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>,
+) -> Option<String> {
+    let mut path_segments = Vec::new();
+
+    while let Some(token) = iter.peek() {
+        match token {
+            proc_macro2::TokenTree::Punct(p) if p.as_char() == ',' => {
+                // End of topic
+                break;
+            }
+            proc_macro2::TokenTree::Punct(p) if p.as_char() == ':' => {
+                // Part of path separator ::
+                iter.next();
+            }
+            proc_macro2::TokenTree::Ident(ident) => {
+                path_segments.push(ident.to_string());
+                iter.next();
+            }
+            proc_macro2::TokenTree::Literal(lit) => {
+                // String literal topic
+                let s = lit.to_string();
+                iter.next();
+                // Remove quotes from string literal
+                if s.starts_with('"') && s.ends_with('"') {
+                    return Some(s[1..s.len() - 1].to_string());
+                }
+                return Some(s);
+            }
+            _ => {
+                iter.next();
+            }
+        }
+    }
+
+    if path_segments.is_empty() {
+        None
+    } else {
+        Some(path_segments.join("::"))
+    }
 }
 
 // ============================================================================
@@ -842,9 +1099,9 @@ mod tests {
             impl OwnableTrait for MyContract {
                 fn owner(&self) -> Option<Address> { self.owner }
                 fn owner_mut(&mut self) -> &mut Option<Address> { &mut self.owner }
-                fn transfer_ownership(&mut self, new_owner: Address) {
-                    self.owner = Some(new_owner);
-                }
+                // Method-level emits attribute for trait default impl
+                #[contract(emits = [(OwnershipTransferred::TOPIC, OwnershipTransferred)])]
+                fn transfer_ownership(&mut self, new_owner: Address) {}
             }
         };
         let trait_impl = TraitImplInfo {
@@ -856,6 +1113,87 @@ mod tests {
         assert!(result.is_ok());
         let functions = result.unwrap();
         assert_eq!(functions.len(), 2);
+    }
+
+    #[test]
+    fn test_public_methods_delegating_with_emits() {
+        // Inherent method with an emit-free body but an `emits` attribute
+        // (delegates to a helper) — the new strict check must accept it.
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                #[contract(emits = [(Resolved::TOPIC, Resolved)])]
+                pub fn resolve(&mut self) {
+                    self.core.resolve();
+                }
+            }
+        };
+        let functions = match public_methods(&impl_block) {
+            Ok(functions) => functions,
+            Err(err) => panic!("expected success, got: {err}"),
+        };
+        assert_eq!(functions.len(), 1);
+        assert_eq!(functions[0].name.to_string(), "resolve");
+    }
+
+    #[test]
+    fn test_public_methods_delegating_without_emits_errors() {
+        // Same shape without the `emits` attribute must still fail the strict
+        // mutating-method check.
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn resolve(&mut self) {
+                    self.core.resolve();
+                }
+            }
+        };
+        let Err(err) = public_methods(&impl_block) else {
+            panic!("expected error for delegating method without emits");
+        };
+        assert!(err.to_string().contains("emits no events"));
+    }
+
+    #[test]
+    fn test_trait_method_emits_collects_events() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            #[contract(expose = [transfer_ownership])]
+            impl OwnableTrait for MyContract {
+                #[contract(emits = [(Transferred::TOPIC, Transferred)])]
+                fn transfer_ownership(&mut self) {}
+
+                // Not in expose list — should be ignored even with emits.
+                #[contract(emits = [(Hidden::TOPIC, Hidden)])]
+                fn unexposed(&mut self) {}
+            }
+        };
+        let trait_impl = TraitImplInfo {
+            trait_name: "OwnableTrait".to_string(),
+            impl_block: &impl_block,
+            expose_list: vec!["transfer_ownership".to_string()],
+        };
+        let events = trait_method_emits(&trait_impl);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].topic, "Transferred::TOPIC");
+    }
+
+    #[test]
+    fn test_inherent_method_emits_collects_events() {
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                #[contract(emits = [(Resolved::TOPIC, Resolved)])]
+                pub fn resolve(&mut self) { self.core.resolve(); }
+
+                // Private method — should be ignored.
+                #[contract(emits = [(Hidden::TOPIC, Hidden)])]
+                fn private_helper(&mut self) { self.core.hidden(); }
+
+                // Constructor — should be ignored even if it carries emits.
+                #[contract(emits = [(New::TOPIC, New)])]
+                pub fn new() -> Self { Self }
+            }
+        };
+        let events = inherent_method_emits(&impl_block);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].topic, "Resolved::TOPIC");
     }
 
     #[test]
@@ -1386,5 +1724,51 @@ mod tests {
 
         let trait_impls = trait_impls(&items, "MyContract");
         assert_eq!(trait_impls.len(), 2);
+    }
+
+    // ========================================================================
+    // topic_from_expr tests
+    // ========================================================================
+
+    #[test]
+    fn test_topic_from_expr_string_literal() {
+        let expr: Expr = syn::parse_quote!("my_topic");
+        assert_eq!(topic_from_expr(&expr), Some("my_topic".to_string()));
+    }
+
+    #[test]
+    fn test_topic_from_expr_const_path() {
+        let expr: Expr = syn::parse_quote!(MyEvent::TOPIC);
+        assert_eq!(topic_from_expr(&expr), Some("MyEvent::TOPIC".to_string()));
+    }
+
+    #[test]
+    fn test_topic_from_expr_module_path() {
+        let expr: Expr = syn::parse_quote!(events::MyEvent::TOPIC);
+        assert_eq!(
+            topic_from_expr(&expr),
+            Some("events::MyEvent::TOPIC".to_string())
+        );
+    }
+
+    #[test]
+    fn test_topic_from_expr_variable() {
+        // Variable returns the variable name (warning emitted separately)
+        let expr: Expr = syn::parse_quote!(topic);
+        assert_eq!(topic_from_expr(&expr), Some("topic".to_string()));
+    }
+
+    #[test]
+    fn test_topic_from_expr_uppercase_single_ident() {
+        // Single uppercase ident is likely a const, not a variable
+        let expr: Expr = syn::parse_quote!(TOPIC);
+        assert_eq!(topic_from_expr(&expr), Some("TOPIC".to_string()));
+    }
+
+    #[test]
+    fn test_topic_from_expr_non_path_returns_none() {
+        // Non-path expressions return None
+        let expr: Expr = syn::parse_quote!(some_fn());
+        assert_eq!(topic_from_expr(&expr), None);
     }
 }

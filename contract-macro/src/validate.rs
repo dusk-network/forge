@@ -362,6 +362,58 @@ pub(crate) fn trait_method(
     Ok(())
 }
 
+/// Validate that a mutating method emits events.
+///
+/// Public `&mut self` methods should emit events for observability. This
+/// validation produces a compile error if such a method doesn't emit events,
+/// unless:
+/// - The method has `#[contract(no_event)]` to explicitly suppress the check
+/// - The method has manual events registered via `#[contract(emits = [...])]`
+pub(crate) fn method_emits_event(
+    method: &ImplItemFn,
+    has_emit_call: bool,
+    suppressed: bool,
+    has_manual_events: bool,
+) -> Result<(), syn::Error> {
+    // Skip if method has #[contract(no_event)] attribute
+    if suppressed {
+        return Ok(());
+    }
+
+    // Skip if not a mutating method (&mut self)
+    let receiver = method.sig.inputs.first().and_then(|arg| {
+        if let FnArg::Receiver(r) = arg {
+            Some(r)
+        } else {
+            None
+        }
+    });
+
+    let Some(receiver) = receiver else {
+        // No self parameter - not a mutating method
+        return Ok(());
+    };
+
+    // Only check &mut self methods
+    if receiver.reference.is_none() || receiver.mutability.is_none() {
+        return Ok(());
+    }
+
+    // Check if method emits events (either directly or via manual registration)
+    if !has_emit_call && !has_manual_events {
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            format!(
+                "public method `{}` mutates state but emits no events; \
+                 add an `abi::emit()` call or suppress with `#[contract(no_event)]`",
+                method.sig.ident
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -773,5 +825,69 @@ mod tests {
             msg.contains("return type"),
             "error should mention return type: {msg}"
         );
+    }
+
+    // ========================================================================
+    // method_emits_event tests
+    // ========================================================================
+
+    #[test]
+    fn test_method_emits_event_ref_self_no_emit_ok() {
+        // &self methods don't need to emit events
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn get_value(&self) -> u64 { 0 }
+        };
+        assert!(method_emits_event(&method, false, false, false).is_ok());
+    }
+
+    #[test]
+    fn test_method_emits_event_mut_self_with_emit_ok() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn set_value(&mut self, value: u64) { }
+        };
+        assert!(method_emits_event(&method, true, false, false).is_ok());
+    }
+
+    #[test]
+    fn test_method_emits_event_mut_self_no_emit_error() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn set_value(&mut self, value: u64) { }
+        };
+        let err = method_emits_event(&method, false, false, false).unwrap_err();
+        assert!(err.to_string().contains("emits no events"));
+    }
+
+    #[test]
+    fn test_method_emits_event_mut_self_no_emit_suppressed() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn set_value(&mut self, value: u64) { }
+        };
+        assert!(method_emits_event(&method, false, true, false).is_ok());
+    }
+
+    #[test]
+    fn test_method_emits_event_mut_self_with_manual_events() {
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn set_value(&mut self, value: u64) { }
+        };
+        assert!(method_emits_event(&method, false, false, true).is_ok());
+    }
+
+    #[test]
+    fn test_method_emits_event_no_receiver_ok() {
+        // Associated function (no self) doesn't need emit
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn default_value() -> u64 { 0 }
+        };
+        assert!(method_emits_event(&method, false, false, false).is_ok());
+    }
+
+    #[test]
+    fn test_method_emits_event_consuming_self_ok() {
+        // Consuming self (not &mut self) doesn't need emit check
+        let method: ImplItemFn = syn::parse_quote! {
+            pub fn into_value(self) -> u64 { 0 }
+        };
+        assert!(method_emits_event(&method, false, false, false).is_ok());
     }
 }
