@@ -13,14 +13,174 @@
 //! The module is feature-gated with `#[cfg(feature = "data-driver")]` and uses
 //! fully-qualified type paths resolved at extraction time.
 
+use std::collections::HashSet;
+
 use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
+use quote::{ToTokens, quote};
 
 use crate::resolve::TypeMap;
-use crate::{CustomDataDriverHandler, DataDriverRole, EventInfo, FunctionInfo};
+use crate::{CustomDataDriverHandler, DataDriverRole, EventInfo, FunctionInfo, ImportInfo};
+
+/// Canonical handler signature for a given role.
+///
+/// Both the dispatch code in this module (which splices `handler(arg)` calls
+/// into the generated match arms) and the compile-time handler validator
+/// consume this — changes to the dispatch shape must go through here so the
+/// two agree.
+pub(crate) struct HandlerSignature {
+    /// The handler's sole argument type, e.g. `&str` or `&[u8]`.
+    pub arg_type: TokenStream2,
+    /// The handler's return type, e.g. `Result<alloc::vec::Vec<u8>, …>`.
+    pub return_type: TokenStream2,
+}
+
+/// Canonical signature per role.
+///
+/// The `arg_type` reflects the name used in the dispatch (`json` is `&str`,
+/// `rkyv` is `&[u8]`). The `return_type` reflects the trait method that owns
+/// each match arm.
+pub(crate) fn handler_signature(role: DataDriverRole) -> HandlerSignature {
+    match role {
+        DataDriverRole::EncodeInput => HandlerSignature {
+            arg_type: quote!(&str),
+            return_type: quote!(Result<alloc::vec::Vec<u8>, dusk_data_driver::Error>),
+        },
+        DataDriverRole::DecodeInput | DataDriverRole::DecodeOutput => HandlerSignature {
+            arg_type: quote!(&[u8]),
+            return_type: quote!(Result<dusk_data_driver::JsonValue, dusk_data_driver::Error>),
+        },
+    }
+}
+
+/// Human-readable role name, matching the attribute the user writes.
+pub(crate) fn role_name(role: DataDriverRole) -> &'static str {
+    match role {
+        DataDriverRole::EncodeInput => "encode_input",
+        DataDriverRole::DecodeInput => "decode_input",
+        DataDriverRole::DecodeOutput => "decode_output",
+    }
+}
+
+/// Render the canonical handler signature for display in diagnostics,
+/// e.g. `fn(&str) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error>`.
+pub(crate) fn handler_signature_display(role: DataDriverRole) -> String {
+    let sig = handler_signature(role);
+    let arg = pretty_tokens(&sig.arg_type);
+    let ret = pretty_tokens(&sig.return_type);
+    format!("fn({arg}) -> {ret}")
+}
+
+/// Normalized token string — collapses whitespace differences introduced by
+/// `quote!` so compared signatures are stable regardless of how the user
+/// spaced their handler's types.
+pub(crate) fn normalize_tokens_string(tokens: &TokenStream2) -> String {
+    tokens
+        .to_string()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Pretty-printed form of a type token stream for human-readable diagnostics.
+///
+/// `TokenStream::to_string` emits `& str` / `Result < T , E >` with spaces
+/// that rustc's type printer doesn't use — this trims them back down so the
+/// signature displayed to the user matches what they would write in code.
+pub(crate) fn pretty_tokens(tokens: &TokenStream2) -> String {
+    normalize_tokens_string(tokens)
+        .replace(" :: ", "::")
+        .replace(" < ", "<")
+        .replace(" <", "<")
+        .replace(" > ", ">")
+        .replace(" >", ">")
+        .replace("& ", "&")
+        .replace(" ,", ",")
+}
+
+/// Generate the runtime error arm body for an `is_custom` function at the
+/// given dispatch site.
+///
+/// Produces a `Result::Err` with a role-tailored message that names both the
+/// role (so the user knows which handler is missing) and the expected
+/// handler signature in concrete types (so the user can fix the handler from
+/// the error alone).
+fn missing_handler_arm(fn_name: &str, role: DataDriverRole) -> TokenStream2 {
+    let role_str = role_name(role);
+    let sig_str = handler_signature_display(role);
+    quote! {
+        #fn_name => Err(dusk_data_driver::Error::Unsupported(
+            alloc::format!(
+                "missing {} handler for `{}`; expected handler signature: {}",
+                #role_str, #fn_name, #sig_str
+            )
+        ))
+    }
+}
+
+/// Build `use` items that mirror the contract module's imports needed by
+/// custom handlers, to be spliced into the generated `data_driver` submodule.
+///
+/// Only imports referenced by handler tokens (signature or body) are emitted,
+/// to keep the submodule from inheriting contract-only imports (e.g. ABI
+/// types feature-gated out of the data-driver build). Each entry becomes
+/// `use <path> as <name>;` when the path's last segment differs from the
+/// name (i.e. the user wrote `use X as Y;`), and `use <path>;` otherwise —
+/// so handlers moved into the submodule resolve the same short names they
+/// resolved in the outer module, for both signature and body.
+fn reemit_imports(
+    imports: &[ImportInfo],
+    handlers: &[CustomDataDriverHandler],
+) -> Vec<TokenStream2> {
+    let handler_idents = collect_handler_identifiers(handlers);
+
+    imports
+        .iter()
+        .filter(|import| handler_idents.contains(&import.name))
+        .filter_map(|import| {
+            let path: syn::Path = syn::parse_str(&import.path).ok()?;
+            let last_seg = path.segments.last()?.ident.to_string();
+            let item = if last_seg == import.name {
+                quote! { use #path; }
+            } else {
+                let alias: syn::Ident = syn::parse_str(&import.name).ok()?;
+                quote! { use #path as #alias; }
+            };
+            Some(item)
+        })
+        .collect()
+}
+
+/// Collect every identifier that appears in any handler's tokens.
+///
+/// Used to filter the contract module's imports down to those the handlers
+/// actually reference. A handler that uses `Error::from(…)` contributes
+/// `Error` (plus `from`, which no import will match); an import named
+/// `BTreeMap` that no handler mentions is skipped.
+fn collect_handler_identifiers(handlers: &[CustomDataDriverHandler]) -> HashSet<String> {
+    use proc_macro2::TokenTree;
+
+    fn walk(stream: TokenStream2, out: &mut HashSet<String>) {
+        for tree in stream {
+            match tree {
+                TokenTree::Ident(ident) => {
+                    out.insert(ident.to_string());
+                }
+                TokenTree::Group(group) => walk(group.stream(), out),
+                _ => {}
+            }
+        }
+    }
+
+    let mut idents = HashSet::new();
+    for handler in handlers {
+        walk(handler.func.to_token_stream(), &mut idents);
+    }
+    idents
+}
 
 /// Generate the `data_driver` module at crate root level.
 pub(crate) fn module(
+    imports: &[ImportInfo],
     type_map: &TypeMap,
     functions: &[FunctionInfo],
     events: &[EventInfo],
@@ -34,6 +194,12 @@ pub(crate) fn module(
     // Collect custom handler functions to include in the module
     let custom_handler_fns: Vec<_> = custom_handlers.iter().map(|h| &h.func).collect();
 
+    // Re-emit the contract module's `use` items inside the generated submodule
+    // so custom handlers — spliced verbatim from the contract module — resolve
+    // the same short-name paths they did at their original site (handler
+    // signature *and* body).
+    let contract_imports = reemit_imports(imports, custom_handlers);
+
     quote! {
         /// Auto-generated data driver module.
         ///
@@ -41,10 +207,18 @@ pub(crate) fn module(
         /// for encoding/decoding contract function inputs, outputs, and events.
         #[cfg(feature = "data-driver")]
         pub mod data_driver {
+            #![allow(unused_imports)]
+
             extern crate alloc;
-            use alloc::format;
-            use alloc::string::String;
-            use alloc::vec::Vec;
+
+            // Imports re-emitted from the contract module so that spliced
+            // custom handler functions resolve the same short-name paths here
+            // as they did at their original definition site.
+            //
+            // The macro-generated scaffolding below uses fully-qualified paths
+            // (`alloc::vec::Vec`, `alloc::string::String`) so user imports of
+            // `Vec` / `String` won't collide with a preluded one we control.
+            #(#contract_imports)*
 
             // Custom handler functions moved from the contract module
             #(#custom_handler_fns)*
@@ -59,7 +233,7 @@ pub(crate) fn module(
                     &self,
                     fn_name: &str,
                     json: &str,
-                ) -> Result<Vec<u8>, dusk_data_driver::Error> {
+                ) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error> {
                     match fn_name {
                         #(#encode_input_arms,)*
                         name => Err(dusk_data_driver::Error::Unsupported(
@@ -107,7 +281,7 @@ pub(crate) fn module(
                     }
                 }
 
-                fn get_schema(&self) -> String {
+                fn get_schema(&self) -> alloc::string::String {
                     super::CONTRACT_SCHEMA.to_json()
                 }
             }
@@ -147,11 +321,7 @@ fn generate_encode_input_arms(
             let input_type = get_resolved_type(&f.input_type, type_map);
 
             if f.is_custom {
-                quote! {
-                    #name_str => Err(dusk_data_driver::Error::Unsupported(
-                        alloc::format!("custom handler required: {}", #name_str)
-                    ))
-                }
+                missing_handler_arm(&name_str, DataDriverRole::EncodeInput)
             } else {
                 quote! {
                     #name_str => dusk_data_driver::json_to_rkyv::<#input_type>(json)
@@ -187,11 +357,7 @@ fn generate_decode_input_arms(
             let input_type = get_resolved_type(&f.input_type, type_map);
 
             if f.is_custom {
-                quote! {
-                    #name_str => Err(dusk_data_driver::Error::Unsupported(
-                        alloc::format!("custom handler required: {}", #name_str)
-                    ))
-                }
+                missing_handler_arm(&name_str, DataDriverRole::DecodeInput)
             } else {
                 quote! {
                     #name_str => dusk_data_driver::rkyv_to_json::<#input_type>(rkyv)
@@ -243,11 +409,7 @@ fn generate_decode_output_arms(
             };
 
             if f.is_custom {
-                quote! {
-                    #name_str => Err(dusk_data_driver::Error::Unsupported(
-                        alloc::format!("custom handler required: {}", #name_str)
-                    ))
-                }
+                missing_handler_arm(&name_str, DataDriverRole::DecodeOutput)
             } else if type_str == "()" {
                 quote! {
                     #name_str => Ok(dusk_data_driver::JsonValue::Null)
@@ -508,7 +670,18 @@ mod tests {
         assert!(arm_str.contains("\"custom_fn\""));
         assert!(arm_str.contains("Err"));
         assert!(arm_str.contains("Unsupported"));
-        assert!(arm_str.contains("custom handler required"));
+        // The generated error names the role so a user seeing it at runtime
+        // can tell which of the three sites is missing a handler.
+        assert!(
+            arm_str.contains("\"encode_input\""),
+            "error should name the encode_input role: {arm_str}"
+        );
+        // The generated error includes the canonical handler signature in
+        // concrete types so the user can fix the handler from the message.
+        assert!(
+            arm_str.contains(&handler_signature_display(DataDriverRole::EncodeInput)),
+            "error should include the encode_input signature verbatim: {arm_str}"
+        );
     }
 
     #[test]
@@ -590,7 +763,14 @@ mod tests {
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
         assert!(arm_str.contains("Err"));
-        assert!(arm_str.contains("custom handler required"));
+        assert!(
+            arm_str.contains("\"decode_input\""),
+            "error should name the decode_input role: {arm_str}"
+        );
+        assert!(
+            arm_str.contains(&handler_signature_display(DataDriverRole::DecodeInput)),
+            "error should include the decode_input signature verbatim: {arm_str}"
+        );
     }
 
     #[test]
@@ -888,7 +1068,14 @@ mod tests {
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
         assert!(arm_str.contains("Err"));
-        assert!(arm_str.contains("custom handler required"));
+        assert!(
+            arm_str.contains("\"decode_output\""),
+            "error should name the decode_output role: {arm_str}"
+        );
+        assert!(
+            arm_str.contains(&handler_signature_display(DataDriverRole::DecodeOutput)),
+            "error should include the decode_output signature verbatim: {arm_str}"
+        );
     }
 
     #[test]
@@ -1196,7 +1383,7 @@ mod tests {
 
         let events = vec![make_event("PAUSED", quote! { PauseEvent })];
 
-        let output = module(&type_map, &functions, &events, &[]);
+        let output = module(&[], &type_map, &functions, &events, &[]);
         let output_str = normalize_tokens(output);
 
         // Verify module structure
@@ -1217,5 +1404,238 @@ mod tests {
 
         // Verify WASM entrypoint
         assert!(output_str.contains("generate_wasm_entrypoint"));
+    }
+
+    // =========================================================================
+    // role_name / handler_signature_display tests
+    // =========================================================================
+
+    #[test]
+    fn test_role_name_covers_each_role() {
+        // Role names must match the attribute the user writes at the
+        // handler's definition site — anything else would send users
+        // looking for a `decode-input` attribute that doesn't exist.
+        assert_eq!(role_name(DataDriverRole::EncodeInput), "encode_input");
+        assert_eq!(role_name(DataDriverRole::DecodeInput), "decode_input");
+        assert_eq!(role_name(DataDriverRole::DecodeOutput), "decode_output");
+    }
+
+    #[test]
+    fn test_handler_signature_encode_input() {
+        let sig = handler_signature(DataDriverRole::EncodeInput);
+        assert_eq!(normalize_tokens(sig.arg_type.clone()), "& str");
+        assert_eq!(
+            normalize_tokens(sig.return_type.clone()),
+            "Result < alloc :: vec :: Vec < u8 > , dusk_data_driver :: Error >"
+        );
+    }
+
+    #[test]
+    fn test_handler_signature_decode_input_matches_decode_output() {
+        // Both decoder roles take the same rkyv bytes and return the same
+        // JsonValue — the dispatch site uses identical call shapes, so the
+        // canonical signatures must agree.
+        let decode_input = handler_signature(DataDriverRole::DecodeInput);
+        let decode_output = handler_signature(DataDriverRole::DecodeOutput);
+        assert_eq!(
+            normalize_tokens(decode_input.arg_type.clone()),
+            normalize_tokens(decode_output.arg_type.clone()),
+        );
+        assert_eq!(
+            normalize_tokens(decode_input.return_type.clone()),
+            normalize_tokens(decode_output.return_type.clone()),
+        );
+        assert_eq!(normalize_tokens(decode_input.arg_type), "& [u8]");
+        assert_eq!(
+            normalize_tokens(decode_input.return_type),
+            "Result < dusk_data_driver :: JsonValue , dusk_data_driver :: Error >"
+        );
+    }
+
+    #[test]
+    fn test_handler_signature_display_format() {
+        // The display form is what diagnostics show the user — it must
+        // render as a complete `fn(arg) -> ret` form they can copy-paste.
+        assert_eq!(
+            handler_signature_display(DataDriverRole::EncodeInput),
+            "fn(&str) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error>",
+        );
+        assert_eq!(
+            handler_signature_display(DataDriverRole::DecodeInput),
+            "fn(&[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error>",
+        );
+        assert_eq!(
+            handler_signature_display(DataDriverRole::DecodeOutput),
+            "fn(&[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error>",
+        );
+    }
+
+    // =========================================================================
+    // reemit_imports / collect_handler_identifiers tests
+    // =========================================================================
+    //
+    // These back the splice-side half of the validator-vs-splicer contract:
+    // the validator accepts short-path handlers only if the splicer can make
+    // those same paths resolve in the generated submodule. `reemit_imports`
+    // decides which user imports follow the handlers into the submodule;
+    // `collect_handler_identifiers` feeds its filter. A bug here resurfaces
+    // Defect 3 — a validator-only unit test won't catch it.
+
+    fn import(name: &str, path: &str) -> ImportInfo {
+        ImportInfo {
+            name: name.into(),
+            path: path.into(),
+        }
+    }
+
+    fn handler(func: syn::ItemFn) -> CustomDataDriverHandler {
+        CustomDataDriverHandler {
+            fn_name: "h".into(),
+            role: DataDriverRole::EncodeInput,
+            func,
+        }
+    }
+
+    fn emitted_as_string(stream: &TokenStream2) -> String {
+        stream.to_string()
+    }
+
+    #[test]
+    fn test_reemit_imports_skips_unreferenced() {
+        // A handler that only mentions `Error` must not pull the `Unused`
+        // import into the data-driver submodule — otherwise contract-only
+        // imports (e.g. `types::Ownable` gated behind the `abi` feature)
+        // would break the data-driver build.
+        let imports = vec![
+            import("Error", "foo::Error"),
+            import("Unused", "bar::Unused"),
+        ];
+        let h = handler(syn::parse_quote! {
+            fn h(x: &str) -> Result<(), Error> { unimplemented!() }
+        });
+        let emitted = reemit_imports(&imports, &[h]);
+
+        assert_eq!(emitted.len(), 1, "only `Error` should be re-emitted");
+        let s = emitted_as_string(&emitted[0]);
+        assert!(s.contains("Error"), "emitted `use` references Error: {s}");
+        assert!(!s.contains("Unused"), "Unused import must be filtered out");
+    }
+
+    #[test]
+    fn test_reemit_imports_preserves_rename() {
+        // `use foo::Bar as Baz;` is how the parser records a renamed import
+        // (`name` = "Baz", `path` = "foo::Bar"). When the handler references
+        // `Baz`, re-emit must produce `use foo::Bar as Baz;` — keeping the
+        // original type reachable under the alias the handler uses.
+        let imports = vec![import("Baz", "foo::Bar")];
+        let h = handler(syn::parse_quote! {
+            fn h(x: &str) -> Result<(), Baz> { unimplemented!() }
+        });
+        let emitted = reemit_imports(&imports, &[h]);
+
+        assert_eq!(emitted.len(), 1);
+        let s = emitted_as_string(&emitted[0]);
+        assert!(s.contains("Bar"), "emit references the real path: {s}");
+        assert!(s.contains("Baz"), "emit preserves the alias: {s}");
+        assert!(s.contains("as"), "emit uses `as` for renamed imports: {s}");
+    }
+
+    #[test]
+    fn test_reemit_imports_plain_path_omits_as() {
+        // `use foo::Bar;` (no rename) must emit without an `as` clause — a
+        // stray self-alias like `use foo::Bar as Bar;` is legal Rust but
+        // noisy in expanded output and a signal the rename detection is
+        // off.
+        let imports = vec![import("Bar", "foo::Bar")];
+        let h = handler(syn::parse_quote! {
+            fn h(x: &str) -> Result<(), Bar> { unimplemented!() }
+        });
+        let emitted = reemit_imports(&imports, &[h]);
+
+        assert_eq!(emitted.len(), 1);
+        let s = emitted_as_string(&emitted[0]);
+        assert!(
+            !s.contains(" as "),
+            "plain imports must not emit a self-rename: {s}"
+        );
+        assert!(s.contains("Bar"));
+    }
+
+    #[test]
+    fn test_reemit_imports_no_handlers_emits_nothing() {
+        // Without handlers, there's nothing to resolve short paths for —
+        // re-emitting any import is wasted noise and risks unrelated
+        // conflicts in the submodule.
+        let imports = vec![import("Error", "foo::Error")];
+        let emitted = reemit_imports(&imports, &[]);
+        assert!(emitted.is_empty());
+    }
+
+    #[test]
+    fn test_reemit_imports_multi_segment_path() {
+        // `use dusk_data_driver::Error;` → 3-segment path. The emit must
+        // carry the full path so the alias resolves to the right type, not
+        // just `Error` (which wouldn't be in scope in the submodule).
+        let imports = vec![import("Error", "dusk_data_driver::Error")];
+        let h = handler(syn::parse_quote! {
+            fn h(x: &str) -> Result<(), Error> { unimplemented!() }
+        });
+        let emitted = reemit_imports(&imports, &[h]);
+
+        let s = emitted_as_string(&emitted[0]);
+        assert!(
+            s.contains("dusk_data_driver"),
+            "emit carries the full path: {s}"
+        );
+        assert!(s.contains("Error"));
+    }
+
+    #[test]
+    fn test_collect_handler_identifiers_from_signature() {
+        // Signature references: `Result`, `Vec`, `u8`, `Error`. Arg type
+        // `&str` is split into `&` (punct) + `str` (ident) — only `str`
+        // counts. The collector must pick up signature idents even without
+        // a body.
+        let h = handler(syn::parse_quote! {
+            fn h(json: &str) -> Result<Vec<u8>, Error> { unimplemented!() }
+        });
+        let idents = collect_handler_identifiers(&[h]);
+        for name in ["Result", "Vec", "u8", "Error", "str", "json"] {
+            assert!(
+                idents.contains(name),
+                "{name} should be collected from signature, got: {idents:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_collect_handler_identifiers_walks_nested_groups() {
+        // Closures, blocks, and method chains nest tokens inside
+        // `TokenTree::Group` — the walker must recurse into them or body
+        // references like `.map_err(Error::from)` get missed and their
+        // imports would be wrongly filtered out.
+        let h = handler(syn::parse_quote! {
+            fn h(b: &[u8]) -> Result<(), Error> {
+                let _result = (|| Error::from(()))();
+                Ok(())
+            }
+        });
+        let idents = collect_handler_identifiers(&[h]);
+        assert!(
+            idents.contains("Error"),
+            "identifier inside closure body must be collected: {idents:?}"
+        );
+        assert!(
+            idents.contains("from"),
+            "method path segments inside closures must be collected: {idents:?}"
+        );
+    }
+
+    #[test]
+    fn test_collect_handler_identifiers_empty() {
+        // No handlers → empty set, not a panic. Guards the zero-handler
+        // fast path that `reemit_imports` relies on to emit nothing.
+        let idents = collect_handler_identifiers(&[]);
+        assert!(idents.is_empty());
     }
 }

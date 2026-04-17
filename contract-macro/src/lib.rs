@@ -563,7 +563,8 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let type_map = resolve::build_type_map(&imports, &functions, &events);
 
     // Generate data_driver module at crate root level (outside contract module)
-    let data_driver = data_driver::module(&type_map, &functions, &events, &custom_handlers);
+    let data_driver =
+        data_driver::module(&imports, &type_map, &functions, &events, &custom_handlers);
 
     // Rebuild the module with stripped contract attributes on methods
     let mod_vis = &module.vis;

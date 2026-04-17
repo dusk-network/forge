@@ -1,0 +1,5 @@
+error: handler `decode_raw_id` for `decode_input` has return type `alloc::vec::Vec<u8>`, expected `Result<dusk_data_driver::JsonValue, dusk_data_driver::Error>`; full expected signature: `fn(&[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error>`
+  --> tests/compile-fail/handler_wrong_return_decode_input.rs:24:35
+   |
+24 |     fn decode_raw_id(rkyv: &[u8]) -> alloc::vec::Vec<u8> {
+   |                                   ^^^^^^^^^^^^^^^^^^^^^^

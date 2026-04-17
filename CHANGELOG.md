@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add `#[contract(emits = [...])]` method-level attribute for manual event registration, covering both trait impls with default implementations and inherent methods that delegate to helpers in other crates.
 - Add compile error when a public `&mut self` method emits no events. Suppress with `#[contract(no_event)]`.
+- Add compile-time signature validation for custom data-driver handlers registered via `#[contract(encode_input = …)]`, `decode_input`, and `decode_output`. Mismatched argument or return types surface as a clear `compile_error!` at the handler definition, naming the handler, the role, and the expected signature. Idiomatic short paths (`Vec<u8>`, `Error`, `JsonValue` after a `use`) are canonicalised through the contract module's import map and accepted against the role's canonical form; `'static` lifetimes in handler references are rejected with a pointer to drop them or declare a handler-generic lifetime.
 - Add detection of variable identifiers used as `abi::emit()` topics (warning pending `proc_macro_diagnostic` stabilisation).
 - Add the `dusk-forge` CLI with `new`, `build`, `test`, and `check` commands for contract project scaffolding and workflows.
 - Add `expand`, `clean`, and `completions` commands to the `dusk-forge` CLI.
@@ -26,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Make `dusk-forge build data-driver` select the supported project feature (`data-driver-js` or `data-driver`) instead of hardcoding the JS variant.
+- Replace the vague `"custom handler required: {fn}"` runtime error emitted at each of the three data-driver dispatch sites with a role-specific message that names the missing handler's role (`encode_input`, `decode_input`, `decode_output`) and the expected handler signature in concrete types.
+- Re-emit the contract module's `use` items inside the generated `data_driver` submodule so custom data-driver handlers written with idiomatic short paths (`Vec<u8>`, `Error`, `JsonValue` after a `use`) compile end-to-end — the spliced handler body now resolves the same names it did at its original site. Only imports referenced by a handler are carried over, so contract-only imports don't leak into the submodule. The built-in submodule scaffolding also switches to fully-qualified `alloc::vec::Vec` / `alloc::string::String` so a user `use` of the short forms doesn't collide with a preluded import.
 
 ## [0.2.2] - 2026-02-02
 

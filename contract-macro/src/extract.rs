@@ -946,6 +946,9 @@ pub(crate) fn contract_data<'a>(
 
     let trait_impls = trait_impls(items, &name);
     let custom_handlers = custom_data_driver_handlers(items);
+    for handler in &custom_handlers {
+        validate::custom_handler(handler, &imports)?;
+    }
 
     Ok(ContractData {
         imports,

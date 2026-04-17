@@ -26,6 +26,17 @@ fn build_import_map(imports: &[ImportInfo]) -> HashMap<String, String> {
         .collect()
 }
 
+/// Resolve a `syn::Type` to its fully qualified string form using the
+/// contract module's imports.
+///
+/// Shared with the handler-signature validator so the validator and
+/// `build_type_map` agree on what "resolved" means — if short-path handlers
+/// compile end-to-end, they also match the canonical expected signatures.
+pub(crate) fn resolve_type(ty: &syn::Type, imports: &[ImportInfo]) -> String {
+    let import_map = build_import_map(imports);
+    resolve_syn_type(ty, &import_map)
+}
+
 /// Resolve a type path to its fully qualified form.
 ///
 /// Given a type like `Deposit` or `events::PauseToggled` and an import map,
@@ -38,7 +49,7 @@ fn build_import_map(imports: &[ImportInfo]) -> HashMap<String, String> {
 /// - Multi-segment paths: `events::PauseToggled` ->
 ///   `my_crate::events::PauseToggled`
 /// - Generic types: `Option<Deposit>` -> `Option<my_crate::Deposit>`
-fn resolve_type(ty: &TokenStream2, import_map: &HashMap<String, String>) -> String {
+fn resolve_type_tokens(ty: &TokenStream2, import_map: &HashMap<String, String>) -> String {
     let ty_str = ty.to_string();
 
     // Handle unit type
@@ -190,17 +201,17 @@ pub(crate) fn build_type_map(
     // Resolve function input, output, and feed types
     for func in functions {
         let input_key = func.input_type.to_string();
-        let input_resolved = resolve_type(&func.input_type, &import_map);
+        let input_resolved = resolve_type_tokens(&func.input_type, &import_map);
         type_map.insert(input_key, input_resolved);
 
         let output_key = func.output_type.to_string();
-        let output_resolved = resolve_type(&func.output_type, &import_map);
+        let output_resolved = resolve_type_tokens(&func.output_type, &import_map);
         type_map.insert(output_key, output_resolved);
 
         // Resolve feed_type if present (from #[contract(feeds = "Type")])
         if let Some(feed_type) = &func.feed_type {
             let feed_key = feed_type.to_string();
-            let feed_resolved = resolve_type(feed_type, &import_map);
+            let feed_resolved = resolve_type_tokens(feed_type, &import_map);
             type_map.insert(feed_key, feed_resolved);
         }
     }
@@ -208,7 +219,7 @@ pub(crate) fn build_type_map(
     // Resolve event data types and topic paths
     for event in events {
         let data_key = event.data_type.to_string();
-        let data_resolved = resolve_type(&event.data_type, &import_map);
+        let data_resolved = resolve_type_tokens(&event.data_type, &import_map);
         type_map.insert(data_key, data_resolved);
 
         // Also resolve the topic path (e.g., "events::PauseToggled::PAUSED")
@@ -238,7 +249,7 @@ mod tests {
         let import_map = build_import_map(&imports);
 
         let ty = quote! { Deposit };
-        let resolved = resolve_type(&ty, &import_map);
+        let resolved = resolve_type_tokens(&ty, &import_map);
         assert_eq!(resolved, "my_crate::Deposit");
     }
 
@@ -248,7 +259,7 @@ mod tests {
         let import_map = build_import_map(&imports);
 
         let ty = quote! { DSAddress };
-        let resolved = resolve_type(&ty, &import_map);
+        let resolved = resolve_type_tokens(&ty, &import_map);
         assert_eq!(resolved, "my_crate::Address");
     }
 
@@ -258,7 +269,7 @@ mod tests {
         let import_map = build_import_map(&imports);
 
         let ty = quote! { events::PauseToggled };
-        let resolved = resolve_type(&ty, &import_map);
+        let resolved = resolve_type_tokens(&ty, &import_map);
         assert_eq!(resolved, "my_crate::events::PauseToggled");
     }
 
@@ -268,7 +279,7 @@ mod tests {
         let import_map = build_import_map(&imports);
 
         let ty = quote! { Option<Deposit> };
-        let resolved = resolve_type(&ty, &import_map);
+        let resolved = resolve_type_tokens(&ty, &import_map);
         assert_eq!(resolved, "Option<my_crate::Deposit>");
     }
 
@@ -281,7 +292,7 @@ mod tests {
         let import_map = build_import_map(&imports);
 
         let ty = quote! { (Deposit, DSAddress) };
-        let resolved = resolve_type(&ty, &import_map);
+        let resolved = resolve_type_tokens(&ty, &import_map);
         assert_eq!(resolved, "(my_crate::Deposit, my_crate::Address)");
     }
 
@@ -291,7 +302,7 @@ mod tests {
         let import_map = build_import_map(&imports);
 
         let ty = quote! { () };
-        let resolved = resolve_type(&ty, &import_map);
+        let resolved = resolve_type_tokens(&ty, &import_map);
         assert_eq!(resolved, "()");
     }
 
@@ -301,7 +312,7 @@ mod tests {
         let import_map = build_import_map(&imports);
 
         let ty = quote! { u64 };
-        let resolved = resolve_type(&ty, &import_map);
+        let resolved = resolve_type_tokens(&ty, &import_map);
         assert_eq!(resolved, "u64");
     }
 }
