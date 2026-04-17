@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Make `dusk-forge build data-driver` select the supported project feature (`data-driver-js` or `data-driver`) instead of hardcoding the JS variant.
+- Replace the vague `"custom handler required: {fn}"` runtime error emitted at each of the three data-driver dispatch sites with a role-specific message that names the missing handler's role (`encode_input`, `decode_input`, `decode_output`) and the expected handler signature in concrete types.
 
 ## [0.2.2] - 2026-02-02
 

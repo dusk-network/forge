@@ -95,6 +95,25 @@ pub(crate) fn pretty_tokens(tokens: &TokenStream2) -> String {
         .replace(" ,", ",")
 }
 
+/// Generate the runtime error arm body for an `is_custom` function at the
+/// given dispatch site.
+///
+/// Produces a `Result::Err` with a role-tailored message that names both the
+/// role (so the user knows which handler is missing) and the expected
+/// handler signature in concrete types (so the user can fix the handler from
+/// the error alone).
+fn missing_handler_arm(fn_name: &str, role: DataDriverRole) -> TokenStream2 {
+    let role_str = role_name(role);
+    let sig_str = handler_signature_display(role);
+    quote! {
+        #fn_name => Err(dusk_data_driver::Error::Unsupported(
+            alloc::format!(
+                "missing {} handler for `{}`; expected handler signature: {}",
+                #role_str, #fn_name, #sig_str
+            )
+        ))
+    }
+}
 
 /// Generate the `data_driver` module at crate root level.
 pub(crate) fn module(
@@ -224,11 +243,7 @@ fn generate_encode_input_arms(
             let input_type = get_resolved_type(&f.input_type, type_map);
 
             if f.is_custom {
-                quote! {
-                    #name_str => Err(dusk_data_driver::Error::Unsupported(
-                        alloc::format!("custom handler required: {}", #name_str)
-                    ))
-                }
+                missing_handler_arm(&name_str, DataDriverRole::EncodeInput)
             } else {
                 quote! {
                     #name_str => dusk_data_driver::json_to_rkyv::<#input_type>(json)
@@ -264,11 +279,7 @@ fn generate_decode_input_arms(
             let input_type = get_resolved_type(&f.input_type, type_map);
 
             if f.is_custom {
-                quote! {
-                    #name_str => Err(dusk_data_driver::Error::Unsupported(
-                        alloc::format!("custom handler required: {}", #name_str)
-                    ))
-                }
+                missing_handler_arm(&name_str, DataDriverRole::DecodeInput)
             } else {
                 quote! {
                     #name_str => dusk_data_driver::rkyv_to_json::<#input_type>(rkyv)
@@ -320,11 +331,7 @@ fn generate_decode_output_arms(
             };
 
             if f.is_custom {
-                quote! {
-                    #name_str => Err(dusk_data_driver::Error::Unsupported(
-                        alloc::format!("custom handler required: {}", #name_str)
-                    ))
-                }
+                missing_handler_arm(&name_str, DataDriverRole::DecodeOutput)
             } else if type_str == "()" {
                 quote! {
                     #name_str => Ok(dusk_data_driver::JsonValue::Null)
@@ -585,7 +592,18 @@ mod tests {
         assert!(arm_str.contains("\"custom_fn\""));
         assert!(arm_str.contains("Err"));
         assert!(arm_str.contains("Unsupported"));
-        assert!(arm_str.contains("custom handler required"));
+        // The generated error names the role so a user seeing it at runtime
+        // can tell which of the three sites is missing a handler.
+        assert!(
+            arm_str.contains("\"encode_input\""),
+            "error should name the encode_input role: {arm_str}"
+        );
+        // The generated error includes the canonical handler signature in
+        // concrete types so the user can fix the handler from the message.
+        assert!(
+            arm_str.contains(&handler_signature_display(DataDriverRole::EncodeInput)),
+            "error should include the encode_input signature verbatim: {arm_str}"
+        );
     }
 
     #[test]
@@ -667,7 +685,14 @@ mod tests {
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
         assert!(arm_str.contains("Err"));
-        assert!(arm_str.contains("custom handler required"));
+        assert!(
+            arm_str.contains("\"decode_input\""),
+            "error should name the decode_input role: {arm_str}"
+        );
+        assert!(
+            arm_str.contains(&handler_signature_display(DataDriverRole::DecodeInput)),
+            "error should include the decode_input signature verbatim: {arm_str}"
+        );
     }
 
     #[test]
@@ -965,7 +990,14 @@ mod tests {
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
         assert!(arm_str.contains("Err"));
-        assert!(arm_str.contains("custom handler required"));
+        assert!(
+            arm_str.contains("\"decode_output\""),
+            "error should name the decode_output role: {arm_str}"
+        );
+        assert!(
+            arm_str.contains(&handler_signature_display(DataDriverRole::DecodeOutput)),
+            "error should include the decode_output signature verbatim: {arm_str}"
+        );
     }
 
     #[test]
