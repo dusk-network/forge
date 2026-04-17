@@ -27,9 +27,19 @@ mod test_contract {
 
     use alloc::collections::BTreeMap;
     use alloc::string::String;
+    // `Vec` / `Error` / `JsonValue` are referenced as short paths by the
+    // custom-handler signatures below — the `#[contract]` macro re-emits
+    // these imports into the generated `data_driver` submodule so the
+    // spliced handlers resolve the same names they did here. Gating them on
+    // the data-driver feature also keeps the contract build warning-free,
+    // since no contract-side code uses these names directly.
+    #[cfg(feature = "data-driver")]
+    use alloc::vec::Vec;
 
     use dusk_core::abi;
     use dusk_core::signatures::bls::PublicKey;
+    #[cfg(feature = "data-driver")]
+    use dusk_data_driver::{Error, JsonValue};
     use types::{Item, ItemId, Ownable, events, helpers};
 
     // =========================================================================
@@ -281,19 +291,21 @@ mod test_contract {
 
     /// Custom encoder for the `raw_id` data-driver function.
     ///
-    /// Demonstrates custom data-driver functions that exist only in the
-    /// data-driver WASM, not as contract methods.
+    /// Written with short paths (`Vec`, `Error`) to exercise import re-emit
+    /// end-to-end: the signature and body both resolve against the re-emitted
+    /// `use dusk_data_driver::{Error, JsonValue};` / `use alloc::vec::Vec;`
+    /// inside the generated `data_driver` submodule.
     #[contract(encode_input = "raw_id")]
-    fn encode_raw_id(json: &str) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error> {
+    fn encode_raw_id(json: &str) -> Result<Vec<u8>, Error> {
         let id: u64 = serde_json::from_str(json)?;
         Ok(id.to_le_bytes().to_vec())
     }
 
     /// Custom decoder for the `raw_id` data-driver function.
     #[contract(decode_output = "raw_id")]
-    fn decode_raw_id(bytes: &[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error> {
+    fn decode_raw_id(bytes: &[u8]) -> Result<JsonValue, Error> {
         if bytes.len() != 8 {
-            return Err(dusk_data_driver::Error::Unsupported(alloc::format!(
+            return Err(Error::Unsupported(alloc::format!(
                 "expected 8 bytes, got {}",
                 bytes.len()
             )));
