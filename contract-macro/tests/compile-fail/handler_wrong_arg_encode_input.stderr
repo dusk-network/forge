@@ -1,0 +1,5 @@
+error: handler `encode_raw_id` for `encode_input` has argument type `&[u8]`, expected `&str`; full expected signature: `fn(&str) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error>`
+  --> tests/compile-fail/handler_wrong_arg_encode_input.rs:23:29
+   |
+23 |     fn encode_raw_id(bytes: &[u8]) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error> {
+   |                             ^^^^^

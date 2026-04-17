@@ -1,0 +1,5 @@
+error: handler `encode_raw_id` for `encode_input` cannot bind a `'static` lifetime; the dispatcher passes a local borrow. Drop the lifetime or declare a handler-generic one (e.g. `fn encode_raw_id<'a>(…)`). Expected signature: `fn(&str) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error>`
+  --> tests/compile-fail/handler_static_lifetime_rejected.rs:25:29
+   |
+25 |     fn encode_raw_id(json: &'static str) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error> {
+   |                             ^^^^^^^

@@ -19,6 +19,83 @@ use quote::quote;
 use crate::resolve::TypeMap;
 use crate::{CustomDataDriverHandler, DataDriverRole, EventInfo, FunctionInfo};
 
+/// Canonical handler signature for a given role.
+///
+/// Both the dispatch code in this module (which splices `handler(arg)` calls
+/// into the generated match arms) and the compile-time handler validator
+/// consume this — changes to the dispatch shape must go through here so the
+/// two agree.
+pub(crate) struct HandlerSignature {
+    /// The handler's sole argument type, e.g. `&str` or `&[u8]`.
+    pub arg_type: TokenStream2,
+    /// The handler's return type, e.g. `Result<alloc::vec::Vec<u8>, …>`.
+    pub return_type: TokenStream2,
+}
+
+/// Canonical signature per role.
+///
+/// The `arg_type` reflects the name used in the dispatch (`json` is `&str`,
+/// `rkyv` is `&[u8]`). The `return_type` reflects the trait method that owns
+/// each match arm.
+pub(crate) fn handler_signature(role: DataDriverRole) -> HandlerSignature {
+    match role {
+        DataDriverRole::EncodeInput => HandlerSignature {
+            arg_type: quote!(&str),
+            return_type: quote!(Result<alloc::vec::Vec<u8>, dusk_data_driver::Error>),
+        },
+        DataDriverRole::DecodeInput | DataDriverRole::DecodeOutput => HandlerSignature {
+            arg_type: quote!(&[u8]),
+            return_type: quote!(Result<dusk_data_driver::JsonValue, dusk_data_driver::Error>),
+        },
+    }
+}
+
+/// Human-readable role name, matching the attribute the user writes.
+pub(crate) fn role_name(role: DataDriverRole) -> &'static str {
+    match role {
+        DataDriverRole::EncodeInput => "encode_input",
+        DataDriverRole::DecodeInput => "decode_input",
+        DataDriverRole::DecodeOutput => "decode_output",
+    }
+}
+
+/// Render the canonical handler signature for display in diagnostics,
+/// e.g. `fn(&str) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error>`.
+pub(crate) fn handler_signature_display(role: DataDriverRole) -> String {
+    let sig = handler_signature(role);
+    let arg = pretty_tokens(&sig.arg_type);
+    let ret = pretty_tokens(&sig.return_type);
+    format!("fn({arg}) -> {ret}")
+}
+
+/// Normalized token string — collapses whitespace differences introduced by
+/// `quote!` so compared signatures are stable regardless of how the user
+/// spaced their handler's types.
+pub(crate) fn normalize_tokens_string(tokens: &TokenStream2) -> String {
+    tokens
+        .to_string()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Pretty-printed form of a type token stream for human-readable diagnostics.
+///
+/// `TokenStream::to_string` emits `& str` / `Result < T , E >` with spaces
+/// that rustc's type printer doesn't use — this trims them back down so the
+/// signature displayed to the user matches what they would write in code.
+pub(crate) fn pretty_tokens(tokens: &TokenStream2) -> String {
+    normalize_tokens_string(tokens)
+        .replace(" :: ", "::")
+        .replace(" < ", "<")
+        .replace(" <", "<")
+        .replace(" > ", ">")
+        .replace(" >", ">")
+        .replace("& ", "&")
+        .replace(" ,", ",")
+}
+
+
 /// Generate the `data_driver` module at crate root level.
 pub(crate) fn module(
     type_map: &TypeMap,
@@ -1217,5 +1294,69 @@ mod tests {
 
         // Verify WASM entrypoint
         assert!(output_str.contains("generate_wasm_entrypoint"));
+    }
+
+    // =========================================================================
+    // role_name / handler_signature_display tests
+    // =========================================================================
+
+    #[test]
+    fn test_role_name_covers_each_role() {
+        // Role names must match the attribute the user writes at the
+        // handler's definition site — anything else would send users
+        // looking for a `decode-input` attribute that doesn't exist.
+        assert_eq!(role_name(DataDriverRole::EncodeInput), "encode_input");
+        assert_eq!(role_name(DataDriverRole::DecodeInput), "decode_input");
+        assert_eq!(role_name(DataDriverRole::DecodeOutput), "decode_output");
+    }
+
+    #[test]
+    fn test_handler_signature_encode_input() {
+        let sig = handler_signature(DataDriverRole::EncodeInput);
+        assert_eq!(normalize_tokens(sig.arg_type.clone()), "& str");
+        assert_eq!(
+            normalize_tokens(sig.return_type.clone()),
+            "Result < alloc :: vec :: Vec < u8 > , dusk_data_driver :: Error >"
+        );
+    }
+
+    #[test]
+    fn test_handler_signature_decode_input_matches_decode_output() {
+        // Both decoder roles take the same rkyv bytes and return the same
+        // JsonValue — the dispatch site uses identical call shapes, so the
+        // canonical signatures must agree.
+        let decode_input = handler_signature(DataDriverRole::DecodeInput);
+        let decode_output = handler_signature(DataDriverRole::DecodeOutput);
+        assert_eq!(
+            normalize_tokens(decode_input.arg_type.clone()),
+            normalize_tokens(decode_output.arg_type.clone()),
+        );
+        assert_eq!(
+            normalize_tokens(decode_input.return_type.clone()),
+            normalize_tokens(decode_output.return_type.clone()),
+        );
+        assert_eq!(normalize_tokens(decode_input.arg_type), "& [u8]");
+        assert_eq!(
+            normalize_tokens(decode_input.return_type),
+            "Result < dusk_data_driver :: JsonValue , dusk_data_driver :: Error >"
+        );
+    }
+
+    #[test]
+    fn test_handler_signature_display_format() {
+        // The display form is what diagnostics show the user — it must
+        // render as a complete `fn(arg) -> ret` form they can copy-paste.
+        assert_eq!(
+            handler_signature_display(DataDriverRole::EncodeInput),
+            "fn(&str) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error>",
+        );
+        assert_eq!(
+            handler_signature_display(DataDriverRole::DecodeInput),
+            "fn(&[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error>",
+        );
+        assert_eq!(
+            handler_signature_display(DataDriverRole::DecodeOutput),
+            "fn(&[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error>",
+        );
     }
 }

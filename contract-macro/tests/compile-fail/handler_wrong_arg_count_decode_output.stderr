@@ -1,0 +1,6 @@
+error: handler `decode_raw_id` for `decode_output` must take exactly one argument, got 2; expected signature: `fn(&[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error>`
+  --> tests/compile-fail/handler_wrong_arg_count_decode_output.rs:24:9
+   |
+24 | /         rkyv: &[u8],
+25 | |         extra: &[u8],
+   | |_____________________^
