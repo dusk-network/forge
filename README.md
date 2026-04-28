@@ -205,29 +205,6 @@ The data-driver WASM exports these functions:
 
 For JavaScript integration, use [w3sper](https://github.com/dusk-network/rusk/tree/master/w3sper.js) which provides a high-level API for working with data-drivers.
 
-### Custom Serialization
-
-For types requiring custom encoding/decoding:
-
-```rust
-#[contract]
-mod my_contract {
-    // ... contract impl ...
-
-    /// Custom encoder for the "special_data" function.
-    #[contract(encode_input = "special_data")]
-    fn encode_special(json: &str) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error> {
-        // Custom encoding logic
-    }
-
-    /// Custom decoder for the "special_data" function.
-    #[contract(decode_output = "special_data")]
-    fn decode_special(rkyv: &[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error> {
-        // Custom decoding logic
-    }
-}
-```
-
 ## Contract Schema
 
 The macro generates a `CONTRACT_SCHEMA` constant with metadata:

@@ -953,33 +953,6 @@ fn test_schema_import_paths() {
 }
 
 #[test]
-fn test_schema_custom_flag() {
-    let schema_json = get_schema_from_wasm();
-    let schema: serde_json::Value =
-        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
-
-    let functions = schema["functions"]
-        .as_array()
-        .expect("functions should be an array");
-
-    // Regular functions should have custom = false
-    let counter = functions
-        .iter()
-        .find(|f| f["name"] == "counter")
-        .expect("counter should exist");
-    assert_eq!(counter["custom"], false, "counter should not be custom");
-
-    let set_counter = functions
-        .iter()
-        .find(|f| f["name"] == "set_counter")
-        .expect("set_counter should exist");
-    assert_eq!(
-        set_counter["custom"], false,
-        "set_counter should not be custom"
-    );
-}
-
-#[test]
 fn test_schema_nested_generic_types() {
     let schema_json = get_schema_from_wasm();
     let schema: serde_json::Value =
@@ -1198,10 +1171,6 @@ fn test_schema_function_fields_consistent() {
         assert!(
             func_obj.contains_key("output"),
             "Function at index {i} missing 'output' field"
-        );
-        assert!(
-            func_obj.contains_key("custom"),
-            "Function at index {i} missing 'custom' field"
         );
     }
 }

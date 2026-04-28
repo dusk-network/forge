@@ -54,7 +54,6 @@ pub(crate) fn schema(
                     doc: #doc,
                     input: #input_str,
                     output: #output_str,
-                    custom: false,
                 }
             }
         })
