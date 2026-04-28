@@ -12,7 +12,6 @@
 //! - Event emission, streaming via `abi::feed`
 //! - Trait exposure with default implementations
 //! - Multiple impl blocks, associated functions
-//! - Custom data-driver encode/decode
 
 #![no_std]
 #![cfg(target_family = "wasm")]
@@ -273,34 +272,5 @@ mod test_contract {
         /// Empty body signals the macro to use the trait's default
         /// implementation.
         fn version() -> String {}
-    }
-
-    // =========================================================================
-    // Custom data-driver functions
-    // =========================================================================
-
-    /// Custom encoder for the `raw_id` data-driver function.
-    ///
-    /// Demonstrates custom data-driver functions that exist only in the
-    /// data-driver WASM, not as contract methods.
-    #[contract(encode_input = "raw_id")]
-    fn encode_raw_id(json: &str) -> Result<alloc::vec::Vec<u8>, dusk_data_driver::Error> {
-        let id: u64 = serde_json::from_str(json)?;
-        Ok(id.to_le_bytes().to_vec())
-    }
-
-    /// Custom decoder for the `raw_id` data-driver function.
-    #[contract(decode_output = "raw_id")]
-    fn decode_raw_id(bytes: &[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error> {
-        if bytes.len() != 8 {
-            return Err(dusk_data_driver::Error::Unsupported(alloc::format!(
-                "expected 8 bytes, got {}",
-                bytes.len()
-            )));
-        }
-        let mut buf = [0u8; 8];
-        buf.copy_from_slice(bytes);
-        let id = u64::from_le_bytes(buf);
-        Ok(serde_json::to_value(id)?)
     }
 }

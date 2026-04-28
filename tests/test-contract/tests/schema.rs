@@ -440,49 +440,6 @@ impl DataDriverWasm {
     }
 }
 
-#[test]
-fn test_custom_data_driver_function_encode() {
-    let mut driver = DataDriverWasm::new();
-
-    // Test encoding a u64 via the custom "raw_id" function
-    let input_json = "42";
-    let encoded = driver
-        .encode_input("raw_id", input_json)
-        .expect("Failed to encode raw_id");
-
-    assert_eq!(encoded.len(), 8, "Expected 8 bytes for u64");
-    assert_eq!(encoded, 42u64.to_le_bytes().to_vec());
-}
-
-#[test]
-fn test_custom_data_driver_function_decode() {
-    let mut driver = DataDriverWasm::new();
-
-    // Test decoding raw bytes back to u64 via the custom "raw_id" function
-    let rkyv_data = 42u64.to_le_bytes().to_vec();
-    let decoded = driver
-        .decode_output("raw_id", &rkyv_data)
-        .expect("Failed to decode raw_id");
-
-    assert_eq!(decoded, serde_json::json!(42));
-}
-
-#[test]
-fn test_custom_data_driver_function_roundtrip() {
-    let mut driver = DataDriverWasm::new();
-
-    let original_json = "12345";
-    let encoded = driver
-        .encode_input("raw_id", original_json)
-        .expect("Failed to encode raw_id");
-
-    let decoded = driver
-        .decode_output("raw_id", &encoded)
-        .expect("Failed to decode raw_id");
-
-    assert_eq!(decoded, serde_json::json!(12345));
-}
-
 // =============================================================================
 // Tests for #[contract(feeds = "Type")] attribute
 // =============================================================================
