@@ -44,6 +44,8 @@ mod parse;
 mod resolve;
 mod validate;
 
+use std::collections::HashSet;
+
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::quote;
@@ -414,6 +416,20 @@ fn extract_feeds_attribute(attrs: &[Attribute]) -> Option<TokenStream2> {
     None
 }
 
+/// Deduplicate a list of events by topic, keeping the first occurrence.
+///
+/// Two events sharing a topic but registering structurally different data
+/// types collapse to the first-seen entry; the rest are dropped silently
+/// (no diagnostic, no panic). Iteration order is preserved, so the result
+/// is deterministic regardless of `HashSet`'s random seed.
+pub(crate) fn dedup_events_by_topic(events: Vec<EventInfo>) -> Vec<EventInfo> {
+    let mut seen = HashSet::new();
+    events
+        .into_iter()
+        .filter(|e| seen.insert(e.topic.clone()))
+        .collect()
+}
+
 /// Generate the argument expression for passing to the method.
 ///
 /// For reference parameters, adds `&` or `&mut` prefix.
@@ -502,12 +518,8 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         events.extend(extract::trait_method_emits(trait_impl));
     }
 
-    // Deduplicate events by topic
-    let mut seen = std::collections::HashSet::new();
-    let events: Vec<_> = events
-        .into_iter()
-        .filter(|e| seen.insert(e.topic.clone()))
-        .collect();
+    // Deduplicate events by topic — first-seen wins.
+    let events = dedup_events_by_topic(events);
 
     // Generate schema
     let schema = generate::schema(&contract_name, &imports, &functions, &events);
@@ -780,5 +792,105 @@ mod tests {
         let doc = extract_doc_comment(&attrs);
         assert!(doc.is_some());
         assert_eq!(doc.unwrap(), "The doc comment.");
+    }
+
+    // =========================================================================
+    // dedup_events_by_topic tests
+    //
+    // Pin the cross-source first-wins filter that the `contract` macro
+    // applies after gathering events from `extract::emit_calls`,
+    // `extract::inherent_method_emits`, and `extract::trait_method_emits`.
+    // The same helper is also reused inside `extract::emit_calls` itself.
+    // =========================================================================
+
+    #[test]
+    fn test_dedup_events_by_topic_collision_keeps_first() {
+        // Two events sharing a topic but registering structurally different
+        // data types. The first-seen survives; the second is dropped silently
+        // (no diagnostic, no panic).
+        let events = vec![
+            EventInfo {
+                topic: "shared_topic".to_string(),
+                data_type: quote! { FirstEvent },
+            },
+            EventInfo {
+                topic: "shared_topic".to_string(),
+                data_type: quote! { SecondEvent },
+            },
+        ];
+
+        let deduped = dedup_events_by_topic(events);
+
+        assert_eq!(
+            deduped.len(),
+            1,
+            "exactly one event survives a topic collision"
+        );
+        assert_eq!(deduped[0].topic, "shared_topic");
+        assert_eq!(
+            deduped[0].data_type.to_string(),
+            "FirstEvent",
+            "first-seen data type wins; the colliding entry is dropped silently"
+        );
+    }
+
+    #[test]
+    fn test_dedup_events_by_topic_no_overreach_for_distinct_topics() {
+        // Same data type registered under two distinct topics: dedup must not
+        // collapse them — only topics, not data types, drive the filter.
+        let events = vec![
+            EventInfo {
+                topic: "topic_a".to_string(),
+                data_type: quote! { SharedEvent },
+            },
+            EventInfo {
+                topic: "topic_b".to_string(),
+                data_type: quote! { SharedEvent },
+            },
+        ];
+
+        let deduped = dedup_events_by_topic(events);
+
+        assert_eq!(
+            deduped.len(),
+            2,
+            "distinct topics survive even when data types match"
+        );
+        assert_eq!(deduped[0].topic, "topic_a");
+        assert_eq!(deduped[1].topic, "topic_b");
+    }
+
+    #[test]
+    fn test_dedup_events_by_topic_via_extract_pipeline() {
+        // End-to-end through the extract layer: build an impl block where two
+        // public methods carry `#[contract(emits = [...])]` attributes that
+        // share a topic but supply different data types. The macro pipeline
+        // (extract::inherent_method_emits → dedup_events_by_topic) keeps the
+        // first occurrence and drops the rest.
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                #[contract(emits = [(SHARED::TOPIC, FirstEvent)])]
+                pub fn first(&mut self) {}
+
+                #[contract(emits = [(SHARED::TOPIC, SecondEvent)])]
+                pub fn second(&mut self) {}
+            }
+        };
+
+        let collected = extract::inherent_method_emits(&impl_block);
+        assert_eq!(
+            collected.len(),
+            2,
+            "extract layer surfaces both events before dedup"
+        );
+
+        let deduped = dedup_events_by_topic(collected);
+        assert_eq!(deduped.len(), 1, "cross-source dedup keeps a single event");
+        assert_eq!(deduped[0].topic, "SHARED::TOPIC");
+        assert_eq!(
+            deduped[0].data_type.to_string(),
+            "FirstEvent",
+            "first method's registration wins"
+        );
     }
 }

@@ -159,17 +159,15 @@ fn format_generic_args(args: &syn::PathArguments, import_map: &HashMap<String, S
 ///
 /// The first segment is looked up in the import map and resolved if found.
 fn resolve_path_string(path: &str, import_map: &HashMap<String, String>) -> String {
-    let segments: Vec<&str> = path.split("::").collect();
-    if segments.is_empty() {
-        return path.to_string();
+    if path.is_empty() {
+        return String::new();
     }
 
-    // Try to resolve the first segment
+    let segments: Vec<&str> = path.split("::").collect();
     if let Some(resolved_base) = import_map.get(segments[0]) {
         if segments.len() == 1 {
             resolved_base.clone()
         } else {
-            // Append the remaining segments
             format!("{}::{}", resolved_base, segments[1..].join("::"))
         }
     } else {
@@ -303,5 +301,116 @@ mod tests {
         let ty = quote! { u64 };
         let resolved = resolve_type(&ty, &import_map);
         assert_eq!(resolved, "u64");
+    }
+
+    // =========================================================================
+    // resolve_path_string edge cases
+    //
+    // The function splits on `::`, looks up the first segment in the import
+    // map, and reassembles the path. These tests exercise the boundary cases
+    // (empty input, generics in a single segment) plus the resolvable /
+    // unresolvable multi-segment forms that previously had only indirect
+    // coverage via `resolve_type`.
+    // =========================================================================
+
+    #[test]
+    fn test_resolve_path_string_empty_input() {
+        // Empty input is returned unchanged.
+        let import_map = HashMap::new();
+        assert_eq!(resolve_path_string("", &import_map), "");
+    }
+
+    #[test]
+    fn test_resolve_path_string_multi_level_first_segment_rewritten() {
+        // Only the first segment is rewritten; remaining segments pass
+        // through verbatim, joined with `::` exactly as supplied.
+        let imports = vec![make_import("events", "my_crate::events")];
+        let import_map = build_import_map(&imports);
+
+        let resolved = resolve_path_string("events::PauseToggled::PAUSED", &import_map);
+        assert_eq!(resolved, "my_crate::events::PauseToggled::PAUSED");
+    }
+
+    #[test]
+    fn test_resolve_path_string_multi_level_unresolvable_passes_through() {
+        // First segment is missing from the import map: the entire path is
+        // returned as-is (no partial rewrite, no error).
+        let imports = vec![make_import("known", "my_crate::known")];
+        let import_map = build_import_map(&imports);
+
+        let resolved = resolve_path_string("unknown::Type::FIELD", &import_map);
+        assert_eq!(resolved, "unknown::Type::FIELD");
+    }
+
+    #[test]
+    fn test_resolve_path_string_single_segment_with_generics_passes_through() {
+        // `split("::")` does not descend into generic argument lists, so the
+        // entire `Option<MyType>` is treated as the first segment. Since no
+        // import named `Option<MyType>` exists, the path is returned as-is.
+        // This documents the implicit code path: callers cannot rely on this
+        // helper to rewrite type parameters.
+        let imports = vec![make_import("MyType", "my_crate::MyType")];
+        let import_map = build_import_map(&imports);
+
+        let resolved = resolve_path_string("Option<MyType>", &import_map);
+        assert_eq!(
+            resolved, "Option<MyType>",
+            "type parameters in a single-segment path are not descended into"
+        );
+    }
+
+    // =========================================================================
+    // resolve_type fallback
+    //
+    // When `syn::parse2::<syn::Type>` fails on the input tokens, `resolve_type`
+    // returns `ty.to_string()` as a last resort. The fallback is safe today
+    // but untested — a regression that flipped it (panic, empty string) would
+    // not be caught until schema generation broke downstream.
+    // =========================================================================
+
+    #[test]
+    fn test_resolve_type_malformed_input_returns_input_unchanged() {
+        // A token stream that does not parse as a `syn::Type` — `let x = 5`
+        // is a statement, not a type — must round-trip through `resolve_type`
+        // unchanged. No panic, no `Err`, no empty string.
+        let import_map = HashMap::new();
+        let ty: TokenStream2 = quote! { let x = 5 };
+
+        let resolved = resolve_type(&ty, &import_map);
+        assert_eq!(
+            resolved,
+            ty.to_string(),
+            "fallback returns the raw token-stream string when parsing as Type fails"
+        );
+    }
+
+    #[test]
+    fn test_build_type_map_preserves_unparseable_function_input_type() {
+        // Companion: ensure the fallback survives the trip through
+        // `build_type_map`. If a function's input type happens to be
+        // unparseable, downstream consumers (schema, data-driver) must still
+        // see the original token-string verbatim — the fallback string is
+        // stored as the resolved value.
+        let imports = vec![];
+        let func = crate::FunctionInfo {
+            name: quote::format_ident!("malformed"),
+            doc: None,
+            params: vec![],
+            input_type: quote! { let bad = 1 },
+            output_type: quote! { () },
+            returns_ref: false,
+            receiver: crate::Receiver::Ref,
+            trait_name: None,
+            feed_type: None,
+        };
+
+        let type_map = build_type_map(&imports, std::slice::from_ref(&func), &[]);
+
+        let key = func.input_type.to_string();
+        assert_eq!(
+            type_map.get(&key).map(String::as_str),
+            Some(key.as_str()),
+            "build_type_map preserves the original token-string when resolve_type falls back"
+        );
     }
 }

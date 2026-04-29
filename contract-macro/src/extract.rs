@@ -15,8 +15,8 @@ use syn::{
 
 use crate::{
     ContractData, EmitVisitor, EventInfo, FunctionInfo, ImportInfo, ParameterInfo, TraitImplInfo,
-    event_suppressed, extract_doc_comment, extract_feeds_attribute, extract_receiver,
-    get_feed_exprs, has_empty_body, parse, validate, validate_feed_type_match,
+    dedup_events_by_topic, event_suppressed, extract_doc_comment, extract_feeds_attribute,
+    extract_receiver, get_feed_exprs, has_empty_body, parse, validate, validate_feed_type_match,
 };
 
 /// Validate feed-related attributes for a method.
@@ -391,13 +391,7 @@ pub(crate) fn emit_calls(impl_block: &ItemImpl) -> Vec<EventInfo> {
     let mut visitor = EmitVisitor::new();
     visitor.visit_item_impl(impl_block);
 
-    // Deduplicate events by topic (keep first occurrence)
-    let mut seen = std::collections::HashSet::new();
-    visitor
-        .events
-        .into_iter()
-        .filter(|e| seen.insert(e.topic.clone()))
-        .collect()
+    dedup_events_by_topic(visitor.events)
 }
 
 /// Check if a method body contains any `abi::emit()` call.
@@ -1659,5 +1653,62 @@ mod tests {
         // Non-path expressions return None
         let expr: Expr = syn::parse_quote!(some_fn());
         assert_eq!(topic_from_expr(&expr), None);
+    }
+
+    // ========================================================================
+    // emit_calls topic-collision dedup
+    // ========================================================================
+
+    #[test]
+    fn test_emit_calls_dedups_topic_collision_keeps_first() {
+        // Two `abi::emit` calls share a topic but supply different data types.
+        // The dedup inside `emit_calls` keeps the first occurrence and drops
+        // the second silently — no diagnostic, no panic.
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn first(&mut self) {
+                    abi::emit("shared", FirstEvent {});
+                }
+                pub fn second(&mut self) {
+                    abi::emit("shared", SecondEvent {});
+                }
+            }
+        };
+
+        let events = emit_calls(&impl_block);
+
+        assert_eq!(
+            events.len(),
+            1,
+            "exactly one event survives the topic collision"
+        );
+        assert_eq!(events[0].topic, "shared");
+        assert_eq!(
+            normalize_tokens(events[0].data_type.clone()),
+            "FirstEvent",
+            "first-seen data type wins; the colliding entry is dropped silently"
+        );
+    }
+
+    #[test]
+    fn test_emit_calls_preserves_distinct_topics_with_same_data_type() {
+        // Same data type emitted under two distinct topics must NOT collapse —
+        // dedup is keyed on topic only, never on data type.
+        let impl_block: ItemImpl = syn::parse_quote! {
+            impl MyContract {
+                pub fn alpha(&mut self) {
+                    abi::emit("topic_a", SharedEvent {});
+                }
+                pub fn beta(&mut self) {
+                    abi::emit("topic_b", SharedEvent {});
+                }
+            }
+        };
+
+        let events = emit_calls(&impl_block);
+
+        assert_eq!(events.len(), 2, "distinct topics are not collapsed");
+        let topics: Vec<_> = events.iter().map(|e| e.topic.as_str()).collect();
+        assert_eq!(topics, vec!["topic_a", "topic_b"]);
     }
 }
