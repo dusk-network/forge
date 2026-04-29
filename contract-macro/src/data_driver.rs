@@ -301,6 +301,36 @@ mod tests {
     }
 
     #[test]
+    fn test_get_resolved_type_not_in_map_preserved_in_generated_arms() {
+        // Companion to `test_get_resolved_type_not_in_map`: the fallback must
+        // survive end-to-end through arm generation. If the input type isn't
+        // in the type_map, the original token stream is what downstream
+        // consumers (the schema and the WASM data-driver match arms) see —
+        // a regression that flipped this fallback would silently produce an
+        // empty or default type, breaking decoding without any compile error.
+        let type_map = HashMap::new();
+
+        let functions = vec![make_function(
+            "store",
+            quote! { UnknownPayload },
+            quote! { () },
+        )];
+
+        let arms = generate_encode_input_arms(&functions, &type_map);
+        assert_eq!(arms.len(), 1);
+        let arm_str = normalize_tokens(arms[0].clone());
+
+        assert!(
+            arm_str.contains("\"store\""),
+            "function name preserved: {arm_str}"
+        );
+        assert!(
+            arm_str.contains("UnknownPayload"),
+            "unresolved type name appears verbatim in the generated arm: {arm_str}"
+        );
+    }
+
+    #[test]
     fn test_get_resolved_type_complex_path() {
         let mut type_map = HashMap::new();
         type_map.insert("Deposit".to_string(), "my_crate::Deposit".to_string());

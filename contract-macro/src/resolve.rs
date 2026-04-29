@@ -363,4 +363,59 @@ mod tests {
             "type parameters in a single-segment path are not descended into"
         );
     }
+
+    // =========================================================================
+    // resolve_type fallback
+    //
+    // When `syn::parse2::<syn::Type>` fails on the input tokens, `resolve_type`
+    // returns `ty.to_string()` as a last resort. The fallback is safe today
+    // but untested — a regression that flipped it (panic, empty string) would
+    // not be caught until schema generation broke downstream.
+    // =========================================================================
+
+    #[test]
+    fn test_resolve_type_malformed_input_returns_input_unchanged() {
+        // A token stream that does not parse as a `syn::Type` — `let x = 5`
+        // is a statement, not a type — must round-trip through `resolve_type`
+        // unchanged. No panic, no `Err`, no empty string.
+        let import_map = HashMap::new();
+        let ty: TokenStream2 = quote! { let x = 5 };
+
+        let resolved = resolve_type(&ty, &import_map);
+        assert_eq!(
+            resolved,
+            ty.to_string(),
+            "fallback returns the raw token-stream string when parsing as Type fails"
+        );
+    }
+
+    #[test]
+    fn test_build_type_map_preserves_unparseable_function_input_type() {
+        // Companion: ensure the fallback survives the trip through
+        // `build_type_map`. If a function's input type happens to be
+        // unparseable, downstream consumers (schema, data-driver) must still
+        // see the original token-string verbatim — the fallback string is
+        // stored as the resolved value.
+        let imports = vec![];
+        let func = crate::FunctionInfo {
+            name: quote::format_ident!("malformed"),
+            doc: None,
+            params: vec![],
+            input_type: quote! { let bad = 1 },
+            output_type: quote! { () },
+            returns_ref: false,
+            receiver: crate::Receiver::Ref,
+            trait_name: None,
+            feed_type: None,
+        };
+
+        let type_map = build_type_map(&imports, std::slice::from_ref(&func), &[]);
+
+        let key = func.input_type.to_string();
+        assert_eq!(
+            type_map.get(&key).map(String::as_str),
+            Some(key.as_str()),
+            "build_type_map preserves the original token-string when resolve_type falls back"
+        );
+    }
 }
