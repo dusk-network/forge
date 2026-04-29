@@ -159,17 +159,15 @@ fn format_generic_args(args: &syn::PathArguments, import_map: &HashMap<String, S
 ///
 /// The first segment is looked up in the import map and resolved if found.
 fn resolve_path_string(path: &str, import_map: &HashMap<String, String>) -> String {
-    let segments: Vec<&str> = path.split("::").collect();
-    if segments.is_empty() {
-        return path.to_string();
+    if path.is_empty() {
+        return String::new();
     }
 
-    // Try to resolve the first segment
+    let segments: Vec<&str> = path.split("::").collect();
     if let Some(resolved_base) = import_map.get(segments[0]) {
         if segments.len() == 1 {
             resolved_base.clone()
         } else {
-            // Append the remaining segments
             format!("{}::{}", resolved_base, segments[1..].join("::"))
         }
     } else {
@@ -317,10 +315,7 @@ mod tests {
 
     #[test]
     fn test_resolve_path_string_empty_input() {
-        // `"".split("::")` yields one empty segment, so the early-return on
-        // `segments.is_empty()` is unreachable: instead we look up the empty
-        // string in the (empty) import map, miss, and return the empty input
-        // verbatim.
+        // Empty input is returned unchanged.
         let import_map = HashMap::new();
         assert_eq!(resolve_path_string("", &import_map), "");
     }
