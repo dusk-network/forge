@@ -15,8 +15,8 @@ use syn::{
 
 use crate::{
     ContractData, EmitVisitor, EventInfo, FunctionInfo, ImportInfo, ParameterInfo, TraitImplInfo,
-    event_suppressed, extract_doc_comment, extract_feeds_attribute, extract_receiver,
-    get_feed_exprs, has_empty_body, parse, validate, validate_feed_type_match,
+    dedup_events_by_topic, event_suppressed, extract_doc_comment, extract_feeds_attribute,
+    extract_receiver, get_feed_exprs, has_empty_body, parse, validate, validate_feed_type_match,
 };
 
 /// Validate feed-related attributes for a method.
@@ -391,13 +391,7 @@ pub(crate) fn emit_calls(impl_block: &ItemImpl) -> Vec<EventInfo> {
     let mut visitor = EmitVisitor::new();
     visitor.visit_item_impl(impl_block);
 
-    // Deduplicate events by topic (keep first occurrence)
-    let mut seen = std::collections::HashSet::new();
-    visitor
-        .events
-        .into_iter()
-        .filter(|e| seen.insert(e.topic.clone()))
-        .collect()
+    dedup_events_by_topic(visitor.events)
 }
 
 /// Check if a method body contains any `abi::emit()` call.

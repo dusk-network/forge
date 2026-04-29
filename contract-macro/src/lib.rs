@@ -44,6 +44,8 @@ mod parse;
 mod resolve;
 mod validate;
 
+use std::collections::HashSet;
+
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::quote;
@@ -414,6 +416,20 @@ fn extract_feeds_attribute(attrs: &[Attribute]) -> Option<TokenStream2> {
     None
 }
 
+/// Deduplicate a list of events by topic, keeping the first occurrence.
+///
+/// Two events sharing a topic but registering structurally different data
+/// types collapse to the first-seen entry; the rest are dropped silently
+/// (no diagnostic, no panic). Iteration order is preserved, so the result
+/// is deterministic regardless of `HashSet`'s random seed.
+pub(crate) fn dedup_events_by_topic(events: Vec<EventInfo>) -> Vec<EventInfo> {
+    let mut seen = HashSet::new();
+    events
+        .into_iter()
+        .filter(|e| seen.insert(e.topic.clone()))
+        .collect()
+}
+
 /// Generate the argument expression for passing to the method.
 ///
 /// For reference parameters, adds `&` or `&mut` prefix.
@@ -502,12 +518,8 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         events.extend(extract::trait_method_emits(trait_impl));
     }
 
-    // Deduplicate events by topic
-    let mut seen = std::collections::HashSet::new();
-    let events: Vec<_> = events
-        .into_iter()
-        .filter(|e| seen.insert(e.topic.clone()))
-        .collect();
+    // Deduplicate events by topic — first-seen wins.
+    let events = dedup_events_by_topic(events);
 
     // Generate schema
     let schema = generate::schema(&contract_name, &imports, &functions, &events);
