@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Make `dusk-forge build data-driver` select the supported project feature (`data-driver-js` or `data-driver`) instead of hardcoding the JS variant.
 
+### Removed
+
+- Drop the custom data-driver handler escape hatch (`#[contract(custom)]` and the `encode_input` / `decode_input` / `decode_output` attributes). The feature had no production consumers and was the source of recurring macro bugs caused by user code being moved out of its original module and losing its resolution context. Default `rkyv` / JSON codegen is now the only path.
+
 ## [0.2.2] - 2026-02-02
 
 ### Changed

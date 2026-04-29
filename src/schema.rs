@@ -24,8 +24,6 @@ pub struct Function {
     pub input: &'static str,
     /// Output type name (or "()" for no output).
     pub output: &'static str,
-    /// Whether this function requires custom serialization.
-    pub custom: bool,
 }
 
 /// Schema for a contract event.

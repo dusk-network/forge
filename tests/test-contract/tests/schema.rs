@@ -440,49 +440,6 @@ impl DataDriverWasm {
     }
 }
 
-#[test]
-fn test_custom_data_driver_function_encode() {
-    let mut driver = DataDriverWasm::new();
-
-    // Test encoding a u64 via the custom "raw_id" function
-    let input_json = "42";
-    let encoded = driver
-        .encode_input("raw_id", input_json)
-        .expect("Failed to encode raw_id");
-
-    assert_eq!(encoded.len(), 8, "Expected 8 bytes for u64");
-    assert_eq!(encoded, 42u64.to_le_bytes().to_vec());
-}
-
-#[test]
-fn test_custom_data_driver_function_decode() {
-    let mut driver = DataDriverWasm::new();
-
-    // Test decoding raw bytes back to u64 via the custom "raw_id" function
-    let rkyv_data = 42u64.to_le_bytes().to_vec();
-    let decoded = driver
-        .decode_output("raw_id", &rkyv_data)
-        .expect("Failed to decode raw_id");
-
-    assert_eq!(decoded, serde_json::json!(42));
-}
-
-#[test]
-fn test_custom_data_driver_function_roundtrip() {
-    let mut driver = DataDriverWasm::new();
-
-    let original_json = "12345";
-    let encoded = driver
-        .encode_input("raw_id", original_json)
-        .expect("Failed to encode raw_id");
-
-    let decoded = driver
-        .decode_output("raw_id", &encoded)
-        .expect("Failed to decode raw_id");
-
-    assert_eq!(decoded, serde_json::json!(12345));
-}
-
 // =============================================================================
 // Tests for #[contract(feeds = "Type")] attribute
 // =============================================================================
@@ -996,33 +953,6 @@ fn test_schema_import_paths() {
 }
 
 #[test]
-fn test_schema_custom_flag() {
-    let schema_json = get_schema_from_wasm();
-    let schema: serde_json::Value =
-        serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
-
-    let functions = schema["functions"]
-        .as_array()
-        .expect("functions should be an array");
-
-    // Regular functions should have custom = false
-    let counter = functions
-        .iter()
-        .find(|f| f["name"] == "counter")
-        .expect("counter should exist");
-    assert_eq!(counter["custom"], false, "counter should not be custom");
-
-    let set_counter = functions
-        .iter()
-        .find(|f| f["name"] == "set_counter")
-        .expect("set_counter should exist");
-    assert_eq!(
-        set_counter["custom"], false,
-        "set_counter should not be custom"
-    );
-}
-
-#[test]
 fn test_schema_nested_generic_types() {
     let schema_json = get_schema_from_wasm();
     let schema: serde_json::Value =
@@ -1241,10 +1171,6 @@ fn test_schema_function_fields_consistent() {
         assert!(
             func_obj.contains_key("output"),
             "Function at index {i} missing 'output' field"
-        );
-        assert!(
-            func_obj.contains_key("custom"),
-            "Function at index {i} missing 'custom' field"
         );
     }
 }

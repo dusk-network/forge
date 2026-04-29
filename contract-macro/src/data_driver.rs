@@ -17,22 +17,18 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 
 use crate::resolve::TypeMap;
-use crate::{CustomDataDriverHandler, DataDriverRole, EventInfo, FunctionInfo};
+use crate::{EventInfo, FunctionInfo};
 
 /// Generate the `data_driver` module at crate root level.
 pub(crate) fn module(
     type_map: &TypeMap,
     functions: &[FunctionInfo],
     events: &[EventInfo],
-    custom_handlers: &[CustomDataDriverHandler],
 ) -> TokenStream2 {
-    let encode_input_arms = generate_encode_input_arms(functions, type_map, custom_handlers);
-    let decode_input_arms = generate_decode_input_arms(functions, type_map, custom_handlers);
-    let decode_output_arms = generate_decode_output_arms(functions, type_map, custom_handlers);
+    let encode_input_arms = generate_encode_input_arms(functions, type_map);
+    let decode_input_arms = generate_decode_input_arms(functions, type_map);
+    let decode_output_arms = generate_decode_output_arms(functions, type_map);
     let decode_event_arms = generate_decode_event_arms(events, type_map);
-
-    // Collect custom handler functions to include in the module
-    let custom_handler_fns: Vec<_> = custom_handlers.iter().map(|h| &h.func).collect();
 
     quote! {
         /// Auto-generated data driver module.
@@ -45,9 +41,6 @@ pub(crate) fn module(
             use alloc::format;
             use alloc::string::String;
             use alloc::vec::Vec;
-
-            // Custom handler functions moved from the contract module
-            #(#custom_handler_fns)*
 
             /// Auto-generated contract driver.
             #[derive(Default)]
@@ -135,83 +128,31 @@ fn get_resolved_type(ty: &TokenStream2, type_map: &TypeMap) -> TokenStream2 {
 }
 
 /// Generate match arms for `encode_input_fn`.
-fn generate_encode_input_arms(
-    functions: &[FunctionInfo],
-    type_map: &TypeMap,
-    custom_handlers: &[CustomDataDriverHandler],
-) -> Vec<TokenStream2> {
-    let mut arms: Vec<TokenStream2> = functions
+fn generate_encode_input_arms(functions: &[FunctionInfo], type_map: &TypeMap) -> Vec<TokenStream2> {
+    functions
         .iter()
         .map(|f| {
             let name_str = f.name.to_string();
             let input_type = get_resolved_type(&f.input_type, type_map);
-
-            if f.is_custom {
-                quote! {
-                    #name_str => Err(dusk_data_driver::Error::Unsupported(
-                        alloc::format!("custom handler required: {}", #name_str)
-                    ))
-                }
-            } else {
-                quote! {
-                    #name_str => dusk_data_driver::json_to_rkyv::<#input_type>(json)
-                }
+            quote! {
+                #name_str => dusk_data_driver::json_to_rkyv::<#input_type>(json)
             }
         })
-        .collect();
-
-    // Add custom handler arms
-    for handler in custom_handlers {
-        if handler.role == DataDriverRole::EncodeInput {
-            let fn_name_str = &handler.fn_name;
-            let handler_fn_name = &handler.func.sig.ident;
-            arms.push(quote! {
-                #fn_name_str => #handler_fn_name(json)
-            });
-        }
-    }
-
-    arms
+        .collect()
 }
 
 /// Generate match arms for `decode_input_fn`.
-fn generate_decode_input_arms(
-    functions: &[FunctionInfo],
-    type_map: &TypeMap,
-    custom_handlers: &[CustomDataDriverHandler],
-) -> Vec<TokenStream2> {
-    let mut arms: Vec<TokenStream2> = functions
+fn generate_decode_input_arms(functions: &[FunctionInfo], type_map: &TypeMap) -> Vec<TokenStream2> {
+    functions
         .iter()
         .map(|f| {
             let name_str = f.name.to_string();
             let input_type = get_resolved_type(&f.input_type, type_map);
-
-            if f.is_custom {
-                quote! {
-                    #name_str => Err(dusk_data_driver::Error::Unsupported(
-                        alloc::format!("custom handler required: {}", #name_str)
-                    ))
-                }
-            } else {
-                quote! {
-                    #name_str => dusk_data_driver::rkyv_to_json::<#input_type>(rkyv)
-                }
+            quote! {
+                #name_str => dusk_data_driver::rkyv_to_json::<#input_type>(rkyv)
             }
         })
-        .collect();
-
-    // Add custom handler arms
-    for handler in custom_handlers {
-        if handler.role == DataDriverRole::DecodeInput {
-            let fn_name_str = &handler.fn_name;
-            let handler_fn_name = &handler.func.sig.ident;
-            arms.push(quote! {
-                #fn_name_str => #handler_fn_name(rkyv)
-            });
-        }
-    }
-
-    arms
+        .collect()
 }
 
 /// Generate match arms for `decode_output_fn`.
@@ -222,9 +163,8 @@ fn generate_decode_input_arms(
 fn generate_decode_output_arms(
     functions: &[FunctionInfo],
     type_map: &TypeMap,
-    custom_handlers: &[CustomDataDriverHandler],
 ) -> Vec<TokenStream2> {
-    let mut arms: Vec<TokenStream2> = functions
+    functions
         .iter()
         .map(|f| {
             let name_str = f.name.to_string();
@@ -242,13 +182,7 @@ fn generate_decode_output_arms(
                 )
             };
 
-            if f.is_custom {
-                quote! {
-                    #name_str => Err(dusk_data_driver::Error::Unsupported(
-                        alloc::format!("custom handler required: {}", #name_str)
-                    ))
-                }
-            } else if type_str == "()" {
+            if type_str == "()" {
                 quote! {
                     #name_str => Ok(dusk_data_driver::JsonValue::Null)
                 }
@@ -262,20 +196,7 @@ fn generate_decode_output_arms(
                 }
             }
         })
-        .collect();
-
-    // Add custom handler arms
-    for handler in custom_handlers {
-        if handler.role == DataDriverRole::DecodeOutput {
-            let fn_name_str = &handler.fn_name;
-            let handler_fn_name = &handler.func.sig.ident;
-            arms.push(quote! {
-                #fn_name_str => #handler_fn_name(rkyv)
-            });
-        }
-    }
-
-    arms
+        .collect()
 }
 
 /// Generate match arms for `decode_event`.
@@ -332,19 +253,13 @@ mod tests {
     }
 
     /// Create a basic `FunctionInfo` for testing.
-    fn make_function(
-        name: &str,
-        input: TokenStream2,
-        output: TokenStream2,
-        is_custom: bool,
-    ) -> FunctionInfo {
+    fn make_function(name: &str, input: TokenStream2, output: TokenStream2) -> FunctionInfo {
         FunctionInfo {
             name: format_ident!("{}", name),
             doc: None,
             params: vec![],
             input_type: input,
             output_type: output,
-            is_custom,
             returns_ref: false,
             receiver: Receiver::Ref,
             trait_name: None,
@@ -357,27 +272,6 @@ mod tests {
         EventInfo {
             topic: topic.to_string(),
             data_type,
-        }
-    }
-
-    /// Create a `CustomDataDriverHandler` for testing.
-    fn make_custom_handler(
-        fn_name: &str,
-        role: DataDriverRole,
-        handler_name: &str,
-    ) -> CustomDataDriverHandler {
-        // Build the function using the handler_name identifier
-        let handler_ident = format_ident!("{}", handler_name);
-        let func: syn::ItemFn = syn::parse_quote! {
-            fn #handler_ident(_input: &str) -> Result<Vec<u8>, Error> {
-                Ok(vec![])
-            }
-        };
-
-        CustomDataDriverHandler {
-            fn_name: fn_name.to_string(),
-            role,
-            func,
         }
     }
 
@@ -426,13 +320,8 @@ mod tests {
         let mut type_map = HashMap::new();
         type_map.insert("Address".to_string(), "my_crate::Address".to_string());
 
-        let functions = vec![make_function(
-            "init",
-            quote! { Address },
-            quote! { () },
-            false,
-        )];
-        let arms = generate_encode_input_arms(&functions, &type_map, &[]);
+        let functions = vec![make_function("init", quote! { Address }, quote! { () })];
+        let arms = generate_encode_input_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
@@ -448,13 +337,8 @@ mod tests {
     fn test_encode_input_unit_type() {
         let type_map = HashMap::new();
 
-        let functions = vec![make_function(
-            "is_paused",
-            quote! { () },
-            quote! { bool },
-            false,
-        )];
-        let arms = generate_encode_input_arms(&functions, &type_map, &[]);
+        let functions = vec![make_function("is_paused", quote! { () }, quote! { bool })];
+        let arms = generate_encode_input_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
@@ -475,9 +359,8 @@ mod tests {
             "transfer",
             quote! { (Address, u64) },
             quote! { () },
-            false,
         )];
-        let arms = generate_encode_input_arms(&functions, &type_map, &[]);
+        let arms = generate_encode_input_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
@@ -492,55 +375,15 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_input_custom_returns_error() {
-        let type_map = HashMap::new();
-
-        let functions = vec![make_function(
-            "custom_fn",
-            quote! { CustomType },
-            quote! { Vec<u8> },
-            true, // is_custom = true
-        )];
-        let arms = generate_encode_input_arms(&functions, &type_map, &[]);
-
-        assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
-        assert!(arm_str.contains("\"custom_fn\""));
-        assert!(arm_str.contains("Err"));
-        assert!(arm_str.contains("Unsupported"));
-        assert!(arm_str.contains("custom handler required"));
-    }
-
-    #[test]
-    fn test_encode_input_with_custom_handler() {
-        let type_map = HashMap::new();
-        let functions = vec![]; // No regular functions
-
-        let custom_handlers = vec![make_custom_handler(
-            "extra_data",
-            DataDriverRole::EncodeInput,
-            "encode_extra_data",
-        )];
-
-        let arms = generate_encode_input_arms(&functions, &type_map, &custom_handlers);
-
-        assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
-        assert!(arm_str.contains("\"extra_data\""));
-        assert!(arm_str.contains("encode_extra_data"));
-        assert!(arm_str.contains("(json)"));
-    }
-
-    #[test]
     fn test_encode_input_multiple_functions() {
         let type_map = HashMap::new();
 
         let functions = vec![
-            make_function("pause", quote! { () }, quote! { () }, false),
-            make_function("unpause", quote! { () }, quote! { () }, false),
-            make_function("init", quote! { Address }, quote! { () }, false),
+            make_function("pause", quote! { () }, quote! { () }),
+            make_function("unpause", quote! { () }, quote! { () }),
+            make_function("init", quote! { Address }, quote! { () }),
         ];
-        let arms = generate_encode_input_arms(&functions, &type_map, &[]);
+        let arms = generate_encode_input_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 3);
 
@@ -560,57 +403,14 @@ mod tests {
         let mut type_map = HashMap::new();
         type_map.insert("Deposit".to_string(), "my_crate::Deposit".to_string());
 
-        let functions = vec![make_function(
-            "deposit",
-            quote! { Deposit },
-            quote! { () },
-            false,
-        )];
-        let arms = generate_decode_input_arms(&functions, &type_map, &[]);
+        let functions = vec![make_function("deposit", quote! { Deposit }, quote! { () })];
+        let arms = generate_decode_input_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
         assert!(arm_str.contains("\"deposit\""));
         assert!(arm_str.contains("rkyv_to_json"));
         assert!(arm_str.contains("my_crate :: Deposit"));
-    }
-
-    #[test]
-    fn test_decode_input_custom_returns_error() {
-        let type_map = HashMap::new();
-
-        let functions = vec![make_function(
-            "custom_fn",
-            quote! { CustomType },
-            quote! { () },
-            true,
-        )];
-        let arms = generate_decode_input_arms(&functions, &type_map, &[]);
-
-        assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
-        assert!(arm_str.contains("Err"));
-        assert!(arm_str.contains("custom handler required"));
-    }
-
-    #[test]
-    fn test_decode_input_with_custom_handler() {
-        let type_map = HashMap::new();
-        let functions = vec![];
-
-        let custom_handlers = vec![make_custom_handler(
-            "extra_data",
-            DataDriverRole::DecodeInput,
-            "decode_extra_input",
-        )];
-
-        let arms = generate_decode_input_arms(&functions, &type_map, &custom_handlers);
-
-        assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
-        assert!(arm_str.contains("\"extra_data\""));
-        assert!(arm_str.contains("decode_extra_input"));
-        assert!(arm_str.contains("(rkyv)"));
     }
 
     #[test]
@@ -626,9 +426,8 @@ mod tests {
             "transfer_with_fee",
             quote! { (Address, MyAddr, u64) },
             quote! { () },
-            false,
         )];
-        let arms = generate_decode_input_arms(&functions, &type_map, &[]);
+        let arms = generate_decode_input_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
@@ -647,137 +446,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_custom_handler_wrong_role_not_included_in_encode() {
-        let type_map = HashMap::new();
-        let functions = vec![];
-
-        // DecodeOutput handler should NOT appear in encode_input_arms
-        let custom_handlers = vec![make_custom_handler(
-            "extra_data",
-            DataDriverRole::DecodeOutput,
-            "decode_extra_output",
-        )];
-
-        let arms = generate_encode_input_arms(&functions, &type_map, &custom_handlers);
-
-        assert_eq!(
-            arms.len(),
-            0,
-            "DecodeOutput handler should not appear in encode_input_arms"
-        );
-    }
-
-    #[test]
-    fn test_custom_handler_wrong_role_not_included_in_decode_input() {
-        let type_map = HashMap::new();
-        let functions = vec![];
-
-        // EncodeInput handler should NOT appear in decode_input_arms
-        let custom_handlers = vec![make_custom_handler(
-            "extra_data",
-            DataDriverRole::EncodeInput,
-            "encode_extra_data",
-        )];
-
-        let arms = generate_decode_input_arms(&functions, &type_map, &custom_handlers);
-
-        assert_eq!(
-            arms.len(),
-            0,
-            "EncodeInput handler should not appear in decode_input_arms"
-        );
-    }
-
-    #[test]
-    fn test_custom_handler_wrong_role_not_included_in_decode_output() {
-        let type_map = HashMap::new();
-        let functions = vec![];
-
-        // DecodeInput handler should NOT appear in decode_output_arms
-        let custom_handlers = vec![make_custom_handler(
-            "extra_data",
-            DataDriverRole::DecodeInput,
-            "decode_extra_input",
-        )];
-
-        let arms = generate_decode_output_arms(&functions, &type_map, &custom_handlers);
-
-        assert_eq!(
-            arms.len(),
-            0,
-            "DecodeInput handler should not appear in decode_output_arms"
-        );
-    }
-
-    #[test]
-    fn test_encode_input_mixed_regular_and_custom() {
-        let mut type_map = HashMap::new();
-        type_map.insert("Address".to_string(), "my_crate::Address".to_string());
-
-        let functions = vec![
-            make_function("init", quote! { Address }, quote! { () }, false),
-            make_function("is_paused", quote! { () }, quote! { bool }, false),
-        ];
-
-        let custom_handlers = vec![make_custom_handler(
-            "extra_data",
-            DataDriverRole::EncodeInput,
-            "encode_extra_data",
-        )];
-
-        let arms = generate_encode_input_arms(&functions, &type_map, &custom_handlers);
-
-        // Should have 2 regular functions + 1 custom handler
-        assert_eq!(arms.len(), 3);
-
-        let all_arms: String = arms.iter().map(|a| normalize_tokens(a.clone())).collect();
-
-        // Verify regular functions use json_to_rkyv
-        assert!(all_arms.contains("\"init\""));
-        assert!(all_arms.contains("\"is_paused\""));
-        assert!(all_arms.contains("json_to_rkyv"));
-
-        // Verify custom handler calls the handler function
-        assert!(all_arms.contains("\"extra_data\""));
-        assert!(all_arms.contains("encode_extra_data (json)"));
-    }
-
-    #[test]
-    fn test_decode_output_mixed_regular_and_custom() {
-        let type_map = HashMap::new();
-
-        let functions = vec![
-            make_function("pause", quote! { () }, quote! { () }, false),
-            make_function("get_value", quote! { () }, quote! { u64 }, false),
-        ];
-
-        let custom_handlers = vec![make_custom_handler(
-            "extra_data",
-            DataDriverRole::DecodeOutput,
-            "decode_extra_output",
-        )];
-
-        let arms = generate_decode_output_arms(&functions, &type_map, &custom_handlers);
-
-        // Should have 2 regular functions + 1 custom handler
-        assert_eq!(arms.len(), 3);
-
-        let all_arms: String = arms.iter().map(|a| normalize_tokens(a.clone())).collect();
-
-        // Verify pause returns Null (unit type)
-        assert!(all_arms.contains("\"pause\""));
-        assert!(all_arms.contains("JsonValue :: Null"));
-
-        // Verify get_value uses u64 special handler
-        assert!(all_arms.contains("\"get_value\""));
-        assert!(all_arms.contains("rkyv_to_json_u64"));
-
-        // Verify custom handler calls the handler function
-        assert!(all_arms.contains("\"extra_data\""));
-        assert!(all_arms.contains("decode_extra_output (rkyv)"));
-    }
-
     // =========================================================================
     // generate_decode_output_arms tests
     // =========================================================================
@@ -786,8 +454,8 @@ mod tests {
     fn test_decode_output_unit_returns_null() {
         let type_map = HashMap::new();
 
-        let functions = vec![make_function("pause", quote! { () }, quote! { () }, false)];
-        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
+        let functions = vec![make_function("pause", quote! { () }, quote! { () })];
+        let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
@@ -809,9 +477,8 @@ mod tests {
             "finalization_period",
             quote! { () },
             quote! { u64 },
-            false,
         )];
-        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
+        let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
@@ -828,13 +495,8 @@ mod tests {
     fn test_decode_output_bool() {
         let type_map = HashMap::new();
 
-        let functions = vec![make_function(
-            "is_paused",
-            quote! { () },
-            quote! { bool },
-            false,
-        )];
-        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
+        let functions = vec![make_function("is_paused", quote! { () }, quote! { bool })];
+        let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
@@ -857,9 +519,8 @@ mod tests {
             "pending_withdrawal",
             quote! { ItemId },
             quote! { Option<PendingItem> },
-            false,
         )];
-        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
+        let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
@@ -871,44 +532,6 @@ mod tests {
             "Should use resolved type: {}",
             arm_str
         );
-    }
-
-    #[test]
-    fn test_decode_output_custom_returns_error() {
-        let type_map = HashMap::new();
-
-        let functions = vec![make_function(
-            "custom_fn",
-            quote! { () },
-            quote! { Vec<u8> },
-            true,
-        )];
-        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
-
-        assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
-        assert!(arm_str.contains("Err"));
-        assert!(arm_str.contains("custom handler required"));
-    }
-
-    #[test]
-    fn test_decode_output_with_custom_handler() {
-        let type_map = HashMap::new();
-        let functions = vec![];
-
-        let custom_handlers = vec![make_custom_handler(
-            "extra_data",
-            DataDriverRole::DecodeOutput,
-            "decode_extra_output",
-        )];
-
-        let arms = generate_decode_output_arms(&functions, &type_map, &custom_handlers);
-
-        assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
-        assert!(arm_str.contains("\"extra_data\""));
-        assert!(arm_str.contains("decode_extra_output"));
-        assert!(arm_str.contains("(rkyv)"));
     }
 
     // =========================================================================
@@ -928,7 +551,6 @@ mod tests {
             params: vec![],
             input_type: input,
             output_type: output,
-            is_custom: false,
             returns_ref: false,
             receiver: Receiver::Ref,
             trait_name: None,
@@ -951,7 +573,7 @@ mod tests {
             quote! { () },
             quote! { (ItemId, PendingItem) },
         )];
-        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
+        let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
@@ -986,7 +608,7 @@ mod tests {
             quote! { () },
             quote! { ItemId },
         )];
-        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
+        let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
@@ -1003,13 +625,8 @@ mod tests {
         let type_map = HashMap::new();
 
         // Function without feed_type should use output_type as before
-        let functions = vec![make_function(
-            "is_paused",
-            quote! { () },
-            quote! { bool },
-            false,
-        )];
-        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
+        let functions = vec![make_function("is_paused", quote! { () }, quote! { bool })];
+        let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
@@ -1027,7 +644,7 @@ mod tests {
             quote! { () },
             quote! { u64 },
         )];
-        let arms = generate_decode_output_arms(&functions, &type_map, &[]);
+        let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
         let arm_str = normalize_tokens(arms[0].clone());
@@ -1190,13 +807,13 @@ mod tests {
         type_map.insert("Address".to_string(), "my_crate::Address".to_string());
 
         let functions = vec![
-            make_function("init", quote! { Address }, quote! { () }, false),
-            make_function("is_paused", quote! { () }, quote! { bool }, false),
+            make_function("init", quote! { Address }, quote! { () }),
+            make_function("is_paused", quote! { () }, quote! { bool }),
         ];
 
         let events = vec![make_event("PAUSED", quote! { PauseEvent })];
 
-        let output = module(&type_map, &functions, &events, &[]);
+        let output = module(&type_map, &functions, &events);
         let output_str = normalize_tokens(output);
 
         // Verify module structure

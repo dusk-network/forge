@@ -102,8 +102,6 @@ struct FunctionInfo {
     input_type: TokenStream2,
     /// The output type (dereferenced if the method returns a reference).
     output_type: TokenStream2,
-    /// Whether this method has the `#[contract(custom)]` attribute.
-    is_custom: bool,
     /// Whether the method returns a reference (requires `.clone()` in wrapper).
     returns_ref: bool,
     /// The method's receiver type (`&self`, `&mut self`, or none).
@@ -124,28 +122,6 @@ struct EventInfo {
     topic: String,
     /// The event data type.
     data_type: TokenStream2,
-}
-
-/// Which data-driver method a custom handler implements.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum DataDriverRole {
-    /// Handles `encode_input_fn` for a data-driver function.
-    EncodeInput,
-    /// Handles `decode_input_fn` for a data-driver function.
-    DecodeInput,
-    /// Handles `decode_output_fn` for a data-driver function.
-    DecodeOutput,
-}
-
-/// Information about a custom data-driver handler function.
-struct CustomDataDriverHandler {
-    /// The data-driver function name this handler is for (e.g.,
-    /// `"extra_data"`).
-    fn_name: String,
-    /// Which role this handler plays.
-    role: DataDriverRole,
-    /// The function item itself (to be moved into `data_driver` module).
-    func: syn::ItemFn,
 }
 
 /// Visitor to find `abi::emit()` calls within function bodies.
@@ -314,8 +290,6 @@ struct ContractData<'a> {
     impl_blocks: Vec<&'a ItemImpl>,
     /// Trait implementations with `#[contract(expose = [...])]` attributes.
     trait_impls: Vec<TraitImplInfo<'a>>,
-    /// Custom data-driver handler functions.
-    custom_handlers: Vec<CustomDataDriverHandler>,
 }
 
 // ============================================================================
@@ -370,20 +344,6 @@ fn extract_doc_comment(attrs: &[Attribute]) -> Option<String> {
     } else {
         Some(docs.join(" "))
     }
-}
-
-/// Check if method has #[contract(custom)] attribute.
-fn has_custom_attribute(attrs: &[Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if attr.path().is_ident("contract") {
-            // Parse the attribute arguments
-            if let Ok(meta) = attr.meta.require_list() {
-                let tokens = meta.tokens.to_string();
-                return tokens.contains("custom");
-            }
-        }
-        false
-    })
 }
 
 /// Check if method has `#[contract(no_event)]` attribute to suppress the emit
@@ -515,7 +475,6 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         contract_ident,
         impl_blocks,
         trait_impls,
-        custom_handlers,
     } = data;
 
     // Extract functions and events from all inherent impl blocks
@@ -563,7 +522,7 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let type_map = resolve::build_type_map(&imports, &functions, &events);
 
     // Generate data_driver module at crate root level (outside contract module)
-    let data_driver = data_driver::module(&type_map, &functions, &events, &custom_handlers);
+    let data_driver = data_driver::module(&type_map, &functions, &events);
 
     // Rebuild the module with stripped contract attributes on methods
     let mod_vis = &module.vis;
@@ -572,8 +531,6 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let new_items: Vec<_> = items
         .iter()
-        // Filter out custom data-driver handler functions (they go in the data_driver module)
-        .filter(|item| !extract::is_custom_handler(item))
         .map(|item| {
             if let Item::Impl(impl_block) = item
                 && let Type::Path(type_path) = &*impl_block.self_ty
@@ -823,43 +780,5 @@ mod tests {
         let doc = extract_doc_comment(&attrs);
         assert!(doc.is_some());
         assert_eq!(doc.unwrap(), "The doc comment.");
-    }
-
-    // =========================================================================
-    // has_custom_attribute tests
-    // =========================================================================
-
-    #[test]
-    fn test_has_custom_attribute_true() {
-        let attrs: Vec<Attribute> = vec![syn::parse_quote!(#[contract(custom)])];
-        assert!(has_custom_attribute(&attrs));
-    }
-
-    #[test]
-    fn test_has_custom_attribute_false() {
-        let attrs: Vec<Attribute> = vec![syn::parse_quote!(#[doc = "Some doc"])];
-        assert!(!has_custom_attribute(&attrs));
-    }
-
-    #[test]
-    fn test_has_custom_attribute_empty() {
-        let attrs: Vec<Attribute> = vec![];
-        assert!(!has_custom_attribute(&attrs));
-    }
-
-    #[test]
-    fn test_has_custom_attribute_other_contract_attr() {
-        let attrs: Vec<Attribute> = vec![syn::parse_quote!(#[contract(expose = [foo])])];
-        assert!(!has_custom_attribute(&attrs));
-    }
-
-    #[test]
-    fn test_has_custom_attribute_mixed() {
-        let attrs: Vec<Attribute> = vec![
-            syn::parse_quote!(#[doc = "Some doc"]),
-            syn::parse_quote!(#[contract(custom)]),
-            syn::parse_quote!(#[inline]),
-        ];
-        assert!(has_custom_attribute(&attrs));
     }
 }

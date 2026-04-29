@@ -43,7 +43,6 @@ pub(crate) fn schema(
             let doc = f.doc.as_deref().unwrap_or("");
             let input = &f.input_type;
             let output = &f.output_type;
-            let custom = f.is_custom;
 
             // Convert type tokens to string for the schema
             let input_str = input.to_string();
@@ -55,7 +54,6 @@ pub(crate) fn schema(
                     doc: #doc,
                     input: #input_str,
                     output: #output_str,
-                    custom: #custom,
                 }
             }
         })
@@ -226,7 +224,7 @@ pub(crate) fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
         .attrs
         .retain(|attr| !attr.path().is_ident("contract"));
 
-    // Strip from methods (e.g., #[contract(custom)])
+    // Strip from methods (e.g., #[contract(no_event)], #[contract(feeds = "...")])
     for item in &mut impl_block.items {
         if let ImplItem::Fn(method) = item {
             method
@@ -272,7 +270,6 @@ mod tests {
             params: vec![],
             input_type: quote! { () },
             output_type: quote! { bool },
-            is_custom: false,
             returns_ref: false,
             receiver: Receiver::Ref,
             trait_name: None,
@@ -310,7 +307,6 @@ mod tests {
             }],
             input_type: quote! { Address },
             output_type: quote! { () },
-            is_custom: false,
             returns_ref: false,
             receiver: Receiver::RefMut,
             trait_name: None,
@@ -356,7 +352,6 @@ mod tests {
             ],
             input_type: quote! { (Address, u64) },
             output_type: quote! { () },
-            is_custom: false,
             returns_ref: false,
             receiver: Receiver::RefMut,
             trait_name: None,
@@ -390,7 +385,6 @@ mod tests {
                 params: vec![],
                 input_type: quote! { () },
                 output_type: quote! { () },
-                is_custom: false,
                 returns_ref: false,
                 receiver: Receiver::RefMut,
                 trait_name: None,
@@ -402,7 +396,6 @@ mod tests {
                 params: vec![],
                 input_type: quote! { () },
                 output_type: quote! { () },
-                is_custom: false,
                 returns_ref: false,
                 receiver: Receiver::RefMut,
                 trait_name: None,
@@ -441,7 +434,6 @@ mod tests {
             params: vec![],
             input_type: quote! { () },
             output_type: quote! { LargeStruct },
-            is_custom: false,
             returns_ref: true,
             receiver: Receiver::Ref,
             trait_name: None,
@@ -479,7 +471,6 @@ mod tests {
             }],
             input_type: quote! { LargeStruct },
             output_type: quote! { () },
-            is_custom: false,
             returns_ref: false,
             receiver: Receiver::RefMut,
             trait_name: None,
@@ -517,7 +508,6 @@ mod tests {
             }],
             input_type: quote! { Data },
             output_type: quote! { () },
-            is_custom: false,
             returns_ref: false,
             receiver: Receiver::RefMut,
             trait_name: None,

@@ -155,7 +155,6 @@ The macro analyzes the contract module and extracts metadata:
 | Parameters after `self` | Input type (tupled if multiple) |
 | Return type | Output type (`()` if none) |
 | `abi::emit(topic, data)` | Event emission |
-| `#[contract(custom)]` | Requires manual encode/decode in data-driver |
 | `#[contract(feeds = "Type")]` | Specifies the type fed via `abi::feed()` for streaming functions |
 | Doc comments | Included in schema |
 
@@ -234,55 +233,6 @@ The macro validates `feeds` usage and produces helpful error messages:
 
 These checks catch common mistakes at compile time rather than runtime.
 
-### Custom Data-Driver Functions
-
-Sometimes you need data-driver functions that don't correspond to actual contract methods—for example, utility functions for custom serialization. These are "virtual" functions that only exist in the data-driver.
-
-Use the `#[contract(encode_input = "fn_name")]`, `#[contract(decode_input = "fn_name")]`, or `#[contract(decode_output = "fn_name")]` attributes on functions to define custom handlers:
-
-```rust
-#[contract]
-mod my_contract {
-    // ... contract impl ...
-
-    /// Custom encoder for the "raw_id" data-driver function.
-    /// This function is NOT a contract method - it only exists in the data-driver.
-    #[contract(encode_input = "raw_id")]
-    fn encode_raw_id(json: &str) -> Result<Vec<u8>, dusk_data_driver::Error> {
-        let id: u64 = serde_json::from_str(json)?;
-        Ok(id.to_le_bytes().to_vec())
-    }
-
-    /// Custom decoder for the "raw_id" data-driver function.
-    #[contract(decode_output = "raw_id")]
-    fn decode_raw_id(bytes: &[u8]) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error> {
-        if bytes.len() != 8 {
-            return Err(dusk_data_driver::Error::Unsupported(
-                alloc::format!("expected 8 bytes, got {}", bytes.len())
-            ));
-        }
-        let mut buf = [0u8; 8];
-        buf.copy_from_slice(bytes);
-        let id = u64::from_le_bytes(buf);
-        Ok(serde_json::to_value(id)?)
-    }
-}
-```
-
-**Important:** These handler functions are moved into the generated `data_driver` module during macro expansion, so they must use fully-qualified paths for all types (except those available in the data-driver module like `dusk_data_driver::Error` and `alloc::vec::Vec`).
-
-The macro will:
-1. Remove these functions from the contract module (they're not contract methods)
-2. Move them into the generated `data_driver` module
-3. Generate match arms that call them for the specified function name
-
-Each data-driver function can have up to three handlers:
-- `encode_input`: Called by `encode_input_fn(fn_name, json) -> Vec<u8>`
-- `decode_input`: Called by `decode_input_fn(fn_name, rkyv) -> JsonValue`
-- `decode_output`: Called by `decode_output_fn(fn_name, rkyv) -> JsonValue`
-
-If a handler is not provided for a role, the data-driver will return an "Unsupported" error for that operation.
-
 ## Generated Output
 
 ### 1. Contract Schema
@@ -304,14 +254,12 @@ pub const CONTRACT_SCHEMA: dusk_forge::schema::Contract = dusk_forge::schema::Co
             doc: "Initializes the contract with an owner.",
             input: "PublicKey",
             output: "()",
-            custom: false,
         },
         Function {
             name: "counter",
             doc: "Returns the current counter value.",
             input: "()",
             output: "u64",
-            custom: false,
         },
         // ...
     ],
@@ -508,15 +456,6 @@ pub fn empty_id() -> ItemId
 
 No `STATE` access needed. The wrapper calls `MyContract::empty_id()` directly.
 
-### Custom Serialization
-
-```rust
-#[contract(custom)]
-pub fn raw_bytes(&self, data: Vec<u8>) -> Vec<u8>
-```
-
-Marked in schema with `custom: true`. The data-driver returns an "unsupported" error for these functions — custom handlers must be provided via `#[contract(encode_input = "...")]` / `#[contract(decode_output = "...")]` if data-driver support is needed.
-
 ## Comparison
 
 | Aspect | Without Macro | With Macro |
@@ -541,4 +480,3 @@ The `#[contract]` macro provides:
 
 Manual work remaining:
 - Type definitions (shared in `types/`)
-- Custom serialization handlers (rare, via `#[contract(custom)]`)
