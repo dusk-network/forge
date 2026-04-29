@@ -304,4 +304,63 @@ mod tests {
         let resolved = resolve_type(&ty, &import_map);
         assert_eq!(resolved, "u64");
     }
+
+    // =========================================================================
+    // resolve_path_string edge cases
+    //
+    // The function splits on `::`, looks up the first segment in the import
+    // map, and reassembles the path. These tests exercise the boundary cases
+    // (empty input, generics in a single segment) plus the resolvable /
+    // unresolvable multi-segment forms that previously had only indirect
+    // coverage via `resolve_type`.
+    // =========================================================================
+
+    #[test]
+    fn test_resolve_path_string_empty_input() {
+        // `"".split("::")` yields one empty segment, so the early-return on
+        // `segments.is_empty()` is unreachable: instead we look up the empty
+        // string in the (empty) import map, miss, and return the empty input
+        // verbatim.
+        let import_map = HashMap::new();
+        assert_eq!(resolve_path_string("", &import_map), "");
+    }
+
+    #[test]
+    fn test_resolve_path_string_multi_level_first_segment_rewritten() {
+        // Only the first segment is rewritten; remaining segments pass
+        // through verbatim, joined with `::` exactly as supplied.
+        let imports = vec![make_import("events", "my_crate::events")];
+        let import_map = build_import_map(&imports);
+
+        let resolved = resolve_path_string("events::PauseToggled::PAUSED", &import_map);
+        assert_eq!(resolved, "my_crate::events::PauseToggled::PAUSED");
+    }
+
+    #[test]
+    fn test_resolve_path_string_multi_level_unresolvable_passes_through() {
+        // First segment is missing from the import map: the entire path is
+        // returned as-is (no partial rewrite, no error).
+        let imports = vec![make_import("known", "my_crate::known")];
+        let import_map = build_import_map(&imports);
+
+        let resolved = resolve_path_string("unknown::Type::FIELD", &import_map);
+        assert_eq!(resolved, "unknown::Type::FIELD");
+    }
+
+    #[test]
+    fn test_resolve_path_string_single_segment_with_generics_passes_through() {
+        // `split("::")` does not descend into generic argument lists, so the
+        // entire `Option<MyType>` is treated as the first segment. Since no
+        // import named `Option<MyType>` exists, the path is returned as-is.
+        // This documents the implicit code path: callers cannot rely on this
+        // helper to rewrite type parameters.
+        let imports = vec![make_import("MyType", "my_crate::MyType")];
+        let import_map = build_import_map(&imports);
+
+        let resolved = resolve_path_string("Option<MyType>", &import_map);
+        assert_eq!(
+            resolved, "Option<MyType>",
+            "type parameters in a single-segment path are not descended into"
+        );
+    }
 }
