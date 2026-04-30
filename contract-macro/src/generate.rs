@@ -10,7 +10,21 @@ use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{ImplItem, ItemImpl};
 
-use crate::{EventInfo, FunctionInfo, ImportInfo, Receiver, generate_arg_expr};
+use crate::{EventInfo, FunctionInfo, ImportInfo, ParameterInfo, Receiver};
+
+/// Generate the argument expression for passing to the method.
+///
+/// For reference parameters, adds `&` or `&mut` prefix.
+fn generate_arg_expr(param: &ParameterInfo) -> TokenStream2 {
+    let name = &param.name;
+    if param.is_mut_ref {
+        quote! { &mut #name }
+    } else if param.is_ref {
+        quote! { &#name }
+    } else {
+        quote! { #name }
+    }
+}
 
 /// Generate the schema constant.
 pub(crate) fn schema(
