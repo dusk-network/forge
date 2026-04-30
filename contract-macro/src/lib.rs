@@ -38,25 +38,18 @@
 #![warn(missing_debug_implementations, unreachable_pub, rustdoc::all)]
 
 mod data_driver;
-mod extract;
 mod generate;
 mod parse;
 mod resolve;
 mod validate;
 
-use std::collections::HashSet;
-
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::quote;
-use syn::visit::Visit;
-use syn::{
-    Attribute, Expr, ExprCall, ExprLit, ExprPath, FnArg, ImplItemFn, Item, ItemImpl, ItemMod, Lit,
-    Type, parse_macro_input,
-};
+use syn::{Item, ItemImpl, ItemMod, Type, parse_macro_input};
 
 // ============================================================================
-// Data Structures
+// IR Data Structures
 // ============================================================================
 
 /// Information about an imported type.
@@ -126,140 +119,6 @@ struct EventInfo {
     data_type: TokenStream2,
 }
 
-/// Visitor to find `abi::emit()` calls within function bodies.
-struct EmitVisitor {
-    /// Collected events.
-    events: Vec<EventInfo>,
-}
-
-impl EmitVisitor {
-    /// Create a new empty visitor.
-    fn new() -> Self {
-        Self { events: Vec::new() }
-    }
-}
-
-impl<'ast> Visit<'ast> for EmitVisitor {
-    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
-        // Check if this is an abi::emit() call
-        if let Expr::Path(ExprPath { path, .. }) = &*node.func {
-            let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-
-            // Match abi::emit or just emit
-            let is_emit = matches!(
-                segments
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-                ["abi", "emit"] | ["emit"]
-            );
-
-            if is_emit && node.args.len() >= 2 {
-                // First arg is the topic - can be a string literal or a const path
-                let topic = extract::topic_from_expr(node.args.first().unwrap());
-
-                if let Some(topic) = topic {
-                    // Second arg is the event data - extract its type
-                    let data_expr = &node.args[1];
-                    let data_type = extract::type_from_expr(data_expr);
-
-                    self.events.push(EventInfo { topic, data_type });
-                }
-            }
-        }
-
-        // Continue visiting nested expressions
-        syn::visit::visit_expr_call(self, node);
-    }
-}
-
-/// Visitor to detect `abi::feed()` calls within function bodies.
-struct FeedVisitor {
-    /// The expressions passed to `abi::feed()` calls, as strings.
-    feed_exprs: Vec<String>,
-}
-
-impl FeedVisitor {
-    /// Create a new visitor.
-    fn new() -> Self {
-        Self {
-            feed_exprs: Vec::new(),
-        }
-    }
-}
-
-impl<'ast> Visit<'ast> for FeedVisitor {
-    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
-        // Check if this is an abi::feed() call
-        if let Expr::Path(ExprPath { path, .. }) = &*node.func {
-            let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-
-            // Match abi::feed or just feed
-            let is_feed = matches!(
-                segments
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-                ["abi", "feed"] | ["feed"]
-            );
-
-            if is_feed && !node.args.is_empty() {
-                // Capture the expression being fed
-                let expr = &node.args[0];
-                let expr_str = quote!(#expr).to_string();
-                self.feed_exprs.push(expr_str);
-            }
-        }
-
-        // Continue visiting nested expressions
-        syn::visit::visit_expr_call(self, node);
-    }
-}
-
-/// Check if a method body contains `abi::feed()` calls.
-/// Returns the expressions being fed (empty if no feed calls).
-fn get_feed_exprs(method: &ImplItemFn) -> Vec<String> {
-    use syn::visit::Visit;
-    let mut visitor = FeedVisitor::new();
-    visitor.visit_block(&method.block);
-    visitor.feed_exprs
-}
-
-/// Check if a type string looks like a tuple (starts with `(` and contains
-/// `,`).
-fn looks_like_tuple(s: &str) -> bool {
-    let trimmed = s.trim();
-    trimmed.starts_with('(') && trimmed.contains(',')
-}
-
-/// Validate that the `feeds` attribute type matches the fed expressions.
-/// Returns an error message if there's a mismatch, None if OK.
-fn validate_feed_type_match(feed_type_str: &str, feed_exprs: &[String]) -> Option<String> {
-    if feed_exprs.is_empty() {
-        return None;
-    }
-
-    let feeds_is_tuple = looks_like_tuple(feed_type_str);
-
-    // Check the first fed expression (they should all be the same type in practice)
-    let expr = &feed_exprs[0];
-    let expr_is_tuple = looks_like_tuple(expr);
-
-    if feeds_is_tuple && !expr_is_tuple {
-        Some(format!(
-            "feeds attribute specifies tuple type `{feed_type_str}` but expression `{expr}` doesn't look like a tuple"
-        ))
-    } else if !feeds_is_tuple && expr_is_tuple {
-        Some(format!(
-            "feeds attribute specifies non-tuple type `{feed_type_str}` but expression `{expr}` looks like a tuple"
-        ))
-    } else {
-        None
-    }
-}
-
 /// Result of extracting imports from a use statement.
 struct ImportExtraction {
     /// The extracted imports.
@@ -292,156 +151,6 @@ struct ContractData<'a> {
     impl_blocks: Vec<&'a ItemImpl>,
     /// Trait implementations with `#[contract(expose = [...])]` attributes.
     trait_impls: Vec<TraitImplInfo<'a>>,
-}
-
-// ============================================================================
-// Utility Functions
-// ============================================================================
-
-/// Check if an identifier is a relative path keyword.
-fn is_relative_path_keyword(ident: &str) -> bool {
-    matches!(ident, "self" | "super" | "crate")
-}
-
-/// Check if a method body is empty (just `{}`).
-///
-/// Empty bodies in trait impls signal "use the default implementation,
-/// I'm just providing the signature for wrapper generation".
-fn has_empty_body(method: &ImplItemFn) -> bool {
-    method.block.stmts.is_empty()
-}
-
-/// Extract the receiver type from a method signature.
-fn extract_receiver(method: &ImplItemFn) -> Receiver {
-    if let Some(FnArg::Receiver(receiver)) = method.sig.inputs.first() {
-        if receiver.mutability.is_some() {
-            Receiver::RefMut
-        } else {
-            Receiver::Ref
-        }
-    } else {
-        Receiver::None
-    }
-}
-
-/// Extract doc comments from attributes.
-fn extract_doc_comment(attrs: &[Attribute]) -> Option<String> {
-    let docs: Vec<String> = attrs
-        .iter()
-        .filter_map(|attr| {
-            if attr.path().is_ident("doc")
-                && let syn::Meta::NameValue(meta) = &attr.meta
-                && let Expr::Lit(ExprLit {
-                    lit: Lit::Str(s), ..
-                }) = &meta.value
-            {
-                return Some(s.value().trim().to_string());
-            }
-            None
-        })
-        .collect();
-
-    if docs.is_empty() {
-        None
-    } else {
-        Some(docs.join(" "))
-    }
-}
-
-/// Check if method has `#[contract(no_event)]` attribute to suppress the emit
-/// validation.
-fn event_suppressed(attrs: &[Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if attr.path().is_ident("contract")
-            && let Ok(meta) = attr.meta.require_list()
-        {
-            let tokens = meta.tokens.to_string();
-            return tokens.contains("no_event");
-        }
-        false
-    })
-}
-
-/// Extract the `feeds` type from a `#[contract(feeds = "Type")]` attribute.
-///
-/// This attribute specifies the type fed via `abi::feed()` for streaming
-/// functions. When present, the data-driver uses this type for
-/// `decode_output_fn` instead of the function's return type.
-///
-/// Returns `Some(TokenStream2)` with the feed type if found, `None` otherwise.
-fn extract_feeds_attribute(attrs: &[Attribute]) -> Option<TokenStream2> {
-    for attr in attrs {
-        if !attr.path().is_ident("contract") {
-            continue;
-        }
-
-        let Ok(meta) = attr.meta.require_list() else {
-            continue;
-        };
-
-        // Parse: feeds = "Type"
-        let tokens = meta.tokens.clone();
-        let mut iter = tokens.into_iter().peekable();
-
-        // Look for "feeds"
-        let Some(proc_macro2::TokenTree::Ident(ident)) = iter.next() else {
-            continue;
-        };
-        if ident != "feeds" {
-            continue;
-        }
-
-        // Expect "="
-        let Some(proc_macro2::TokenTree::Punct(punct)) = iter.next() else {
-            continue;
-        };
-        if punct.as_char() != '=' {
-            continue;
-        }
-
-        // Expect string literal with type
-        let Some(proc_macro2::TokenTree::Literal(lit)) = iter.next() else {
-            continue;
-        };
-        let lit_str = lit.to_string();
-        // Remove quotes from the literal
-        let type_str = lit_str.trim_matches('"');
-
-        // Parse the type string into tokens
-        if let Ok(ty) = syn::parse_str::<syn::Type>(type_str) {
-            return Some(quote! { #ty });
-        }
-    }
-
-    None
-}
-
-/// Deduplicate a list of events by topic, keeping the first occurrence.
-///
-/// Two events sharing a topic but registering structurally different data
-/// types collapse to the first-seen entry; the rest are dropped silently
-/// (no diagnostic, no panic). Iteration order is preserved, so the result
-/// is deterministic regardless of `HashSet`'s random seed.
-pub(crate) fn dedup_events_by_topic(events: Vec<EventInfo>) -> Vec<EventInfo> {
-    let mut seen = HashSet::new();
-    events
-        .into_iter()
-        .filter(|e| seen.insert(e.topic.clone()))
-        .collect()
-}
-
-/// Generate the argument expression for passing to the method.
-///
-/// For reference parameters, adds `&` or `&mut` prefix.
-fn generate_arg_expr(param: &ParameterInfo) -> TokenStream2 {
-    let name = &param.name;
-    if param.is_mut_ref {
-        quote! { &mut #name }
-    } else if param.is_ref {
-        quote! { &#name }
-    } else {
-        quote! { #name }
-    }
 }
 
 // ============================================================================
@@ -480,7 +189,7 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     // Validate and extract contract data
-    let data = match extract::contract_data(&module, items) {
+    let data = match parse::contract_data(&module, items) {
         Ok(data) => data,
         Err(e) => return e.to_compile_error().into(),
     };
@@ -498,28 +207,28 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut events = Vec::new();
 
     for impl_block in &impl_blocks {
-        match extract::public_methods(impl_block) {
+        match parse::public_methods(impl_block) {
             Ok(methods) => functions.extend(methods),
             Err(e) => return e.to_compile_error().into(),
         }
-        events.extend(extract::emit_calls(impl_block));
+        events.extend(parse::emit_calls(impl_block));
         // Include events from method-level #[contract(emits = [...])] attributes
-        events.extend(extract::inherent_method_emits(impl_block));
+        events.extend(parse::inherent_method_emits(impl_block));
     }
 
     // Extract functions and events from trait impl blocks with expose lists
     for trait_impl in &trait_impls {
-        match extract::trait_methods(trait_impl) {
+        match parse::trait_methods(trait_impl) {
             Ok(trait_functions) => functions.extend(trait_functions),
             Err(e) => return e.to_compile_error().into(),
         }
-        events.extend(extract::emit_calls(trait_impl.impl_block));
+        events.extend(parse::emit_calls(trait_impl.impl_block));
         // Include events from method-level #[contract(emits = [...])] attributes
-        events.extend(extract::trait_method_emits(trait_impl));
+        events.extend(parse::trait_method_emits(trait_impl));
     }
 
     // Deduplicate events by topic — first-seen wins.
-    let events = dedup_events_by_topic(events);
+    let events = parse::dedup_events_by_topic(events);
 
     // Generate schema
     let schema = generate::schema(&contract_name, &imports, &functions, &events);
@@ -584,313 +293,4 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     output.into()
-}
-
-#[cfg(test)]
-mod tests {
-    use syn::visit::Visit;
-
-    use super::*;
-
-    // =========================================================================
-    // EmitVisitor tests
-    // =========================================================================
-
-    #[test]
-    fn test_emit_visitor_finds_emit_call() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn pause(&mut self) {
-                    self.is_paused = true;
-                    abi::emit("paused", PauseEvent {});
-                }
-            }
-        };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 1);
-        assert_eq!(visitor.events[0].topic, "paused");
-    }
-
-    #[test]
-    fn test_emit_visitor_finds_const_topic() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn pause(&mut self) {
-                    abi::emit(events::PauseToggled::PAUSED, events::PauseToggled());
-                }
-            }
-        };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 1);
-        assert_eq!(visitor.events[0].topic, "events::PauseToggled::PAUSED");
-    }
-
-    #[test]
-    fn test_emit_visitor_multiple_emits() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn transfer(&mut self) {
-                    abi::emit("started", StartEvent {});
-                    // do work
-                    abi::emit("completed", CompleteEvent {});
-                }
-            }
-        };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 2);
-    }
-
-    #[test]
-    fn test_emit_visitor_nested_in_if() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn maybe_emit(&mut self, condition: bool) {
-                    if condition {
-                        abi::emit("conditional", Event {});
-                    }
-                }
-            }
-        };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 1);
-        assert_eq!(visitor.events[0].topic, "conditional");
-    }
-
-    #[test]
-    fn test_emit_visitor_nested_in_loop() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn emit_many(&mut self, items: Vec<u32>) {
-                    for item in items {
-                        abi::emit("item_processed", ItemEvent { value: item });
-                    }
-                }
-            }
-        };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 1);
-    }
-
-    #[test]
-    fn test_emit_visitor_just_emit_without_abi_prefix() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn do_something(&mut self) {
-                    emit("event", SomeEvent {});
-                }
-            }
-        };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 1);
-        assert_eq!(visitor.events[0].topic, "event");
-    }
-
-    #[test]
-    fn test_emit_visitor_no_emit_calls() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn get_value(&self) -> u64 {
-                    self.value
-                }
-            }
-        };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 0);
-    }
-
-    #[test]
-    fn test_emit_visitor_across_multiple_methods() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn pause(&mut self) {
-                    abi::emit("paused", PauseEvent {});
-                }
-                pub fn unpause(&mut self) {
-                    abi::emit("unpaused", UnpauseEvent {});
-                }
-            }
-        };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 2);
-    }
-
-    // =========================================================================
-    // extract_doc_comment tests
-    // =========================================================================
-
-    #[test]
-    fn test_extract_doc_comment_single_line() {
-        let attrs: Vec<Attribute> = vec![syn::parse_quote!(#[doc = " First line."])];
-
-        let doc = extract_doc_comment(&attrs);
-        assert!(doc.is_some());
-        assert_eq!(doc.unwrap(), "First line.");
-    }
-
-    #[test]
-    fn test_extract_doc_comment_multiple_lines() {
-        let attrs: Vec<Attribute> = vec![
-            syn::parse_quote!(#[doc = " First line."]),
-            syn::parse_quote!(#[doc = " Second line."]),
-        ];
-
-        let doc = extract_doc_comment(&attrs);
-        assert!(doc.is_some());
-        let doc = doc.unwrap();
-        assert!(doc.contains("First line"));
-        assert!(doc.contains("Second line"));
-    }
-
-    #[test]
-    fn test_extract_doc_comment_none() {
-        let attrs: Vec<Attribute> = vec![syn::parse_quote!(#[inline])];
-
-        let doc = extract_doc_comment(&attrs);
-        assert!(doc.is_none());
-    }
-
-    #[test]
-    fn test_extract_doc_comment_empty() {
-        let attrs: Vec<Attribute> = vec![];
-
-        let doc = extract_doc_comment(&attrs);
-        assert!(doc.is_none());
-    }
-
-    #[test]
-    fn test_extract_doc_comment_mixed_attrs() {
-        let attrs: Vec<Attribute> = vec![
-            syn::parse_quote!(#[inline]),
-            syn::parse_quote!(#[doc = " The doc comment."]),
-            syn::parse_quote!(#[allow(unused)]),
-        ];
-
-        let doc = extract_doc_comment(&attrs);
-        assert!(doc.is_some());
-        assert_eq!(doc.unwrap(), "The doc comment.");
-    }
-
-    // =========================================================================
-    // dedup_events_by_topic tests
-    //
-    // Pin the cross-source first-wins filter that the `contract` macro
-    // applies after gathering events from `extract::emit_calls`,
-    // `extract::inherent_method_emits`, and `extract::trait_method_emits`.
-    // The same helper is also reused inside `extract::emit_calls` itself.
-    // =========================================================================
-
-    #[test]
-    fn test_dedup_events_by_topic_collision_keeps_first() {
-        // Two events sharing a topic but registering structurally different
-        // data types. The first-seen survives; the second is dropped silently
-        // (no diagnostic, no panic).
-        let events = vec![
-            EventInfo {
-                topic: "shared_topic".to_string(),
-                data_type: quote! { FirstEvent },
-            },
-            EventInfo {
-                topic: "shared_topic".to_string(),
-                data_type: quote! { SecondEvent },
-            },
-        ];
-
-        let deduped = dedup_events_by_topic(events);
-
-        assert_eq!(
-            deduped.len(),
-            1,
-            "exactly one event survives a topic collision"
-        );
-        assert_eq!(deduped[0].topic, "shared_topic");
-        assert_eq!(
-            deduped[0].data_type.to_string(),
-            "FirstEvent",
-            "first-seen data type wins; the colliding entry is dropped silently"
-        );
-    }
-
-    #[test]
-    fn test_dedup_events_by_topic_no_overreach_for_distinct_topics() {
-        // Same data type registered under two distinct topics: dedup must not
-        // collapse them — only topics, not data types, drive the filter.
-        let events = vec![
-            EventInfo {
-                topic: "topic_a".to_string(),
-                data_type: quote! { SharedEvent },
-            },
-            EventInfo {
-                topic: "topic_b".to_string(),
-                data_type: quote! { SharedEvent },
-            },
-        ];
-
-        let deduped = dedup_events_by_topic(events);
-
-        assert_eq!(
-            deduped.len(),
-            2,
-            "distinct topics survive even when data types match"
-        );
-        assert_eq!(deduped[0].topic, "topic_a");
-        assert_eq!(deduped[1].topic, "topic_b");
-    }
-
-    #[test]
-    fn test_dedup_events_by_topic_via_extract_pipeline() {
-        // End-to-end through the extract layer: build an impl block where two
-        // public methods carry `#[contract(emits = [...])]` attributes that
-        // share a topic but supply different data types. The macro pipeline
-        // (extract::inherent_method_emits → dedup_events_by_topic) keeps the
-        // first occurrence and drops the rest.
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                #[contract(emits = [(SHARED::TOPIC, FirstEvent)])]
-                pub fn first(&mut self) {}
-
-                #[contract(emits = [(SHARED::TOPIC, SecondEvent)])]
-                pub fn second(&mut self) {}
-            }
-        };
-
-        let collected = extract::inherent_method_emits(&impl_block);
-        assert_eq!(
-            collected.len(),
-            2,
-            "extract layer surfaces both events before dedup"
-        );
-
-        let deduped = dedup_events_by_topic(collected);
-        assert_eq!(deduped.len(), 1, "cross-source dedup keeps a single event");
-        assert_eq!(deduped[0].topic, "SHARED::TOPIC");
-        assert_eq!(
-            deduped[0].data_type.to_string(),
-            "FirstEvent",
-            "first method's registration wins"
-        );
-    }
 }

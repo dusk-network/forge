@@ -8,10 +8,15 @@
 
 use syn::{ItemUse, UseTree};
 
-use crate::{ImportExtraction, ImportInfo, is_relative_path_keyword};
+use crate::{ImportExtraction, ImportInfo};
+
+/// Check if an identifier is a relative path keyword.
+fn is_relative_path_keyword(ident: &str) -> bool {
+    matches!(ident, "self" | "super" | "crate")
+}
 
 /// Extract imports from a `use` statement.
-pub(crate) fn imports_from_use(item_use: &ItemUse) -> ImportExtraction {
+pub(super) fn imports_from_use(item_use: &ItemUse) -> ImportExtraction {
     extract_imports_from_tree(&item_use.tree, "")
 }
 
