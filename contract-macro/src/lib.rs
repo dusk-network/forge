@@ -207,24 +207,24 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut events = Vec::new();
 
     for impl_block in &impl_blocks {
-        match parse::public_methods(impl_block) {
-            Ok(methods) => functions.extend(methods),
+        let (methods, method_events) = match parse::public_methods(impl_block) {
+            Ok(result) => result,
             Err(e) => return e.to_compile_error().into(),
-        }
+        };
+        functions.extend(methods);
         events.extend(parse::emit_calls(impl_block));
-        // Include events from method-level #[contract(emits = [...])] attributes
-        events.extend(parse::inherent_method_emits(impl_block));
+        events.extend(method_events);
     }
 
     // Extract functions and events from trait impl blocks with expose lists
     for trait_impl in &trait_impls {
-        match parse::trait_methods(trait_impl) {
-            Ok(trait_functions) => functions.extend(trait_functions),
+        let (trait_functions, method_events) = match parse::trait_methods(trait_impl) {
+            Ok(result) => result,
             Err(e) => return e.to_compile_error().into(),
-        }
+        };
+        functions.extend(trait_functions);
         events.extend(parse::emit_calls(trait_impl.impl_block));
-        // Include events from method-level #[contract(emits = [...])] attributes
-        events.extend(parse::trait_method_emits(trait_impl));
+        events.extend(method_events);
     }
 
     // Deduplicate events by topic — first-seen wins.

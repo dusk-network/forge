@@ -25,9 +25,7 @@ mod functions;
 mod imports;
 mod module;
 
-pub(crate) use events::{
-    dedup_events_by_topic, emit_calls, inherent_method_emits, trait_method_emits,
-};
+pub(crate) use events::{dedup_events_by_topic, emit_calls};
 pub(crate) use functions::{public_methods, trait_methods};
 use syn::{Item, ItemMod};
 
@@ -59,7 +57,7 @@ pub(crate) fn contract_data<'a>(
     validate::new_constructor(&name, &impl_blocks, struct_)?;
     validate::init_method(&name, &impl_blocks)?;
 
-    let trait_impls = module::trait_impls(items, &name);
+    let trait_impls = module::trait_impls(items, &name)?;
 
     Ok(ContractData {
         imports,

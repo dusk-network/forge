@@ -117,33 +117,36 @@ pub(super) fn impl_blocks<'a>(items: &'a [Item], contract_name: &str) -> Vec<&'a
 ///
 /// Only trait implementations that have an explicit expose list are returned.
 /// The expose list specifies which trait methods should have extern wrappers
-/// generated.
-pub(super) fn trait_impls<'a>(items: &'a [Item], contract_name: &str) -> Vec<TraitImplInfo<'a>> {
-    items
-        .iter()
-        .filter_map(|item| {
-            if let Item::Impl(impl_block) = item
-                && let Some((_, trait_path, _)) = &impl_block.trait_
-                && let Type::Path(type_path) = &*impl_block.self_ty
-                && type_path.path.is_ident(contract_name)
-                && let Some(list) = directives::expose_list(&impl_block.attrs)
-            {
+/// generated. Returns an error if a `#[contract(...)]` attribute on a trait
+/// impl is malformed.
+pub(super) fn trait_impls<'a>(
+    items: &'a [Item],
+    contract_name: &str,
+) -> Result<Vec<TraitImplInfo<'a>>, syn::Error> {
+    let mut result = Vec::new();
+    for item in items {
+        if let Item::Impl(impl_block) = item
+            && let Some((_, trait_path, _)) = &impl_block.trait_
+            && let Type::Path(type_path) = &*impl_block.self_ty
+            && type_path.path.is_ident(contract_name)
+        {
+            let directives = directives::parse_contract_directives(&impl_block.attrs)?;
+            if let Some(expose_list) = directives.expose {
                 let trait_name = trait_path
                     .segments
                     .iter()
                     .map(|s| s.ident.to_string())
                     .collect::<Vec<_>>()
                     .join("::");
-                Some(TraitImplInfo {
+                result.push(TraitImplInfo {
                     trait_name,
                     impl_block,
-                    expose_list: list,
-                })
-            } else {
-                None
+                    expose_list,
+                });
             }
-        })
-        .collect()
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -273,7 +276,7 @@ mod tests {
             }
         }];
 
-        let trait_impls = trait_impls(&items, "MyContract");
+        let trait_impls = trait_impls(&items, "MyContract").unwrap();
         assert_eq!(trait_impls.len(), 1);
         assert_eq!(trait_impls[0].trait_name, "OwnableTrait");
         assert_eq!(trait_impls[0].expose_list, vec!["owner"]);
@@ -287,7 +290,7 @@ mod tests {
             }
         }];
 
-        let trait_impls = trait_impls(&items, "MyContract");
+        let trait_impls = trait_impls(&items, "MyContract").unwrap();
         assert_eq!(
             trait_impls.len(),
             0,
@@ -312,7 +315,7 @@ mod tests {
             },
         ];
 
-        let trait_impls = trait_impls(&items, "MyContract");
+        let trait_impls = trait_impls(&items, "MyContract").unwrap();
         assert_eq!(trait_impls.len(), 2);
     }
 }

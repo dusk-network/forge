@@ -4,346 +4,626 @@
 //
 // Copyright (c) DUSK NETWORK. All rights reserved.
 
-//! Parsers for the `#[contract(...)]` directive on impls and methods.
+//! Parser for the `#[contract(...)]` directive.
 //!
-//! These are four ad-hoc parsers (`expose`, `emits`, `feeds`, `no_event`),
-//! collected here pending consolidation into a single typed parser.
+//! A single typed pass over the directive list yields a [`ContractDirectives`]
+//! struct with one field per supported keyword (`feeds`, `expose`, `emits`,
+//! `no_event`). Shape mismatches surface as span-anchored `syn::Error`s.
 
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::Attribute;
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+use syn::{
+    Attribute, Error as SynError, Ident, LitStr, Path, Token, Type, bracketed, parenthesized,
+    parse_str, parse2, token,
+};
 
-/// Check if method has `#[contract(no_event)]` attribute to suppress the emit
-/// validation.
-pub(super) fn event_suppressed(attrs: &[Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if attr.path().is_ident("contract")
-            && let Ok(meta) = attr.meta.require_list()
-        {
-            let tokens = meta.tokens.to_string();
-            return tokens.contains("no_event");
-        }
-        false
-    })
+use crate::EventInfo;
+
+/// Parsed `#[contract(...)]` directives, aggregated across every contract
+/// attribute on a given item.
+///
+/// Fields default to `None` / `false` when the directive is absent.
+#[derive(Default)]
+pub(crate) struct ContractDirectives {
+    /// Type tokens parsed from `feeds = "<TypeName>"`.
+    pub feeds: Option<TokenStream2>,
+    /// Method names from `expose = [m1, m2, ...]`.
+    pub expose: Option<Vec<String>>,
+    /// Event metadata from `emits = [(topic, EventType), ...]`.
+    pub emits: Option<Vec<EventInfo>>,
+    /// Set when `no_event` appears.
+    pub no_event: bool,
 }
 
-/// Extract the `feeds` type from a `#[contract(feeds = "Type")]` attribute.
+/// Parse all `#[contract(...)]` attributes on an item into a single typed
+/// struct.
 ///
-/// This attribute specifies the type fed via `abi::feed()` for streaming
-/// functions. When present, the data-driver uses this type for
-/// `decode_output_fn` instead of the function's return type.
-///
-/// Returns `Some(TokenStream2)` with the feed type if found, `None` otherwise.
-pub(super) fn extract_feeds_attribute(attrs: &[Attribute]) -> Option<TokenStream2> {
+/// Unrelated attributes (e.g. `#[doc]`, `#[cfg]`) are ignored. Malformed
+/// directive shapes (typo'd keyword, missing value, wrong delimiter) and
+/// duplicate directives (whether within one attribute or across multiple)
+/// return a `syn::Error` whose span points at the offending token.
+pub(crate) fn parse_contract_directives(
+    attrs: &[Attribute],
+) -> Result<ContractDirectives, SynError> {
+    let mut out = ContractDirectives::default();
+
     for attr in attrs {
         if !attr.path().is_ident("contract") {
             continue;
         }
 
-        let Ok(meta) = attr.meta.require_list() else {
-            continue;
-        };
-
-        // Parse: feeds = "Type"
-        let tokens = meta.tokens.clone();
-        let mut iter = tokens.into_iter().peekable();
-
-        // Look for "feeds"
-        let Some(proc_macro2::TokenTree::Ident(ident)) = iter.next() else {
-            continue;
-        };
-        if ident != "feeds" {
-            continue;
-        }
-
-        // Expect "="
-        let Some(proc_macro2::TokenTree::Punct(punct)) = iter.next() else {
-            continue;
-        };
-        if punct.as_char() != '=' {
-            continue;
-        }
-
-        // Expect string literal with type
-        let Some(proc_macro2::TokenTree::Literal(lit)) = iter.next() else {
-            continue;
-        };
-        let lit_str = lit.to_string();
-        // Remove quotes from the literal
-        let type_str = lit_str.trim_matches('"');
-
-        // Parse the type string into tokens
-        if let Ok(ty) = syn::parse_str::<syn::Type>(type_str) {
-            return Some(quote! { #ty });
+        let list = attr.meta.require_list()?;
+        let parsed: DirectiveList = parse2(list.tokens.clone())?;
+        for item in parsed.items {
+            apply_directive(&mut out, item)?;
         }
     }
 
-    None
+    Ok(out)
 }
 
-/// Extract the `expose = [method1, method2, ...]` list from a
-/// `#[contract(...)]` attribute.
-///
-/// Returns `None` if there's no `#[contract(expose = [...])]` attribute.
-/// Returns `Some(vec![...])` with the method names if found.
-pub(super) fn expose_list(attrs: &[Attribute]) -> Option<Vec<String>> {
-    for attr in attrs {
-        if !attr.path().is_ident("contract") {
-            continue;
-        }
-
-        let Ok(meta) = attr.meta.require_list() else {
-            continue;
-        };
-
-        // Parse: expose = [method1, method2, ...]
-        let tokens = meta.tokens.clone();
-        let mut iter = tokens.into_iter().peekable();
-
-        // Look for "expose"
-        let Some(proc_macro2::TokenTree::Ident(ident)) = iter.next() else {
-            continue;
-        };
-        if ident != "expose" {
-            continue;
-        }
-
-        // Expect "="
-        let Some(proc_macro2::TokenTree::Punct(punct)) = iter.next() else {
-            continue;
-        };
-        if punct.as_char() != '=' {
-            continue;
-        }
-
-        // Expect "[...]"
-        let Some(proc_macro2::TokenTree::Group(group)) = iter.next() else {
-            continue;
-        };
-        if group.delimiter() != proc_macro2::Delimiter::Bracket {
-            continue;
-        }
-
-        // Parse the method names from the group
-        let mut methods = Vec::new();
-        for token in group.stream() {
-            if let proc_macro2::TokenTree::Ident(method_ident) = token {
-                methods.push(method_ident.to_string());
+fn apply_directive(out: &mut ContractDirectives, item: DirectiveItem) -> Result<(), SynError> {
+    let DirectiveItem { keyword, kind } = item;
+    match kind {
+        DirectiveKind::Feeds(ts) => set_once(&mut out.feeds, ts, &keyword),
+        DirectiveKind::Expose(names) => set_once(&mut out.expose, names, &keyword),
+        DirectiveKind::Emits(events) => set_once(&mut out.emits, events, &keyword),
+        DirectiveKind::NoEvent => {
+            if out.no_event {
+                return Err(duplicate_directive(&keyword));
             }
-            // Skip commas and other punctuation
+            out.no_event = true;
+            Ok(())
         }
-
-        return Some(methods);
     }
-
-    None
 }
 
-/// Extract the `emits = [(topic, Type), ...]` list from a `#[contract(...)]`
-/// attribute.
-///
-/// Returns `None` if there's no `#[contract(emits = [...])]` attribute.
-/// Returns `Some(vec![...])` with (topic, `data_type`) pairs if found.
-///
-/// Supports two topic formats:
-/// - Const path: `(events::OwnershipTransferred::TOPIC,
-///   events::OwnershipTransferred)`
-/// - String literal: `("my_topic", MyEventType)`
-pub(super) fn emits_list(attrs: &[Attribute]) -> Option<Vec<(String, TokenStream2)>> {
-    for attr in attrs {
-        if !attr.path().is_ident("contract") {
-            continue;
-        }
+fn set_once<T>(slot: &mut Option<T>, value: T, keyword: &Ident) -> Result<(), SynError> {
+    if slot.is_some() {
+        return Err(duplicate_directive(keyword));
+    }
+    *slot = Some(value);
+    Ok(())
+}
 
-        let Ok(meta) = attr.meta.require_list() else {
-            continue;
+fn duplicate_directive(keyword: &Ident) -> SynError {
+    SynError::new(keyword.span(), format!("duplicate `{keyword}` directive"))
+}
+
+struct DirectiveList {
+    items: Vec<DirectiveItem>,
+}
+
+impl Parse for DirectiveList {
+    fn parse(input: ParseStream) -> Result<Self, SynError> {
+        let items = Punctuated::<DirectiveItem, Token![,]>::parse_terminated(input)?
+            .into_iter()
+            .collect();
+        Ok(Self { items })
+    }
+}
+
+struct DirectiveItem {
+    /// The keyword identifier (`feeds`, `expose`, `emits`, `no_event`) — kept
+    /// so duplicate-directive errors can span at the offending occurrence.
+    keyword: Ident,
+    kind: DirectiveKind,
+}
+
+enum DirectiveKind {
+    Feeds(TokenStream2),
+    Expose(Vec<String>),
+    Emits(Vec<EventInfo>),
+    NoEvent,
+}
+
+impl Parse for DirectiveItem {
+    fn parse(input: ParseStream) -> Result<Self, SynError> {
+        let keyword: Ident = input.parse()?;
+        let name = keyword.to_string();
+        let kind = match name.as_str() {
+            "no_event" => DirectiveKind::NoEvent,
+            "feeds" => DirectiveKind::Feeds(parse_feeds(input, &keyword)?),
+            "expose" => DirectiveKind::Expose(parse_expose(input, &keyword)?),
+            "emits" => DirectiveKind::Emits(parse_emits(input, &keyword)?),
+            unknown => {
+                return Err(SynError::new(
+                    keyword.span(),
+                    unknown_directive_msg(unknown),
+                ));
+            }
         };
-
-        // Parse the token stream to find emits = [...]
-        let tokens = meta.tokens.clone();
-        let mut iter = tokens.into_iter().peekable();
-
-        // Look through all tokens for "emits"
-        while let Some(token) = iter.next() {
-            let proc_macro2::TokenTree::Ident(ident) = token else {
-                continue;
-            };
-
-            if ident != "emits" {
-                continue;
-            }
-
-            // Expect "="
-            let Some(proc_macro2::TokenTree::Punct(punct)) = iter.next() else {
-                continue;
-            };
-            if punct.as_char() != '=' {
-                continue;
-            }
-
-            // Expect "[...]"
-            let Some(proc_macro2::TokenTree::Group(group)) = iter.next() else {
-                continue;
-            };
-            if group.delimiter() != proc_macro2::Delimiter::Bracket {
-                continue;
-            }
-
-            // Parse the event tuples from the group
-            return Some(parse_emits_tuples(group.stream()));
-        }
+        Ok(Self { keyword, kind })
     }
-
-    None
 }
 
-/// Parse the contents of `emits = [...]` into a list of (topic, `data_type`)
-/// pairs.
-fn parse_emits_tuples(stream: proc_macro2::TokenStream) -> Vec<(String, TokenStream2)> {
-    let mut events = Vec::new();
+fn parse_feeds(input: ParseStream, kw: &Ident) -> Result<TokenStream2, SynError> {
+    // For a missing `=`, the most informative span is the keyword; for a
+    // wrong-shape value (`feeds = SomeType`), syn's parse failure already
+    // points at the offending token — we just rewrite the message so the
+    // user sees the directive's expected shape.
+    let expected = "expected `feeds = \"<TypeName>\"`";
+    input
+        .parse::<Token![=]>()
+        .map_err(|_| SynError::new(kw.span(), expected))?;
+    let lit: LitStr = input
+        .parse()
+        .map_err(|err| SynError::new(err.span(), expected))?;
+    let ty: Type = parse_str(&lit.value()).map_err(|_| {
+        SynError::new(
+            lit.span(),
+            format!("feeds type `{}` is not a valid Rust type", lit.value()),
+        )
+    })?;
+    Ok(quote! { #ty })
+}
 
-    for token in stream {
-        // Each event is a group: (topic, Type)
-        let proc_macro2::TokenTree::Group(group) = token else {
-            continue;
+fn parse_expose(input: ParseStream, kw: &Ident) -> Result<Vec<String>, SynError> {
+    let expected = "expected `expose = [m1, m2, ...]`";
+    input
+        .parse::<Token![=]>()
+        .map_err(|_| SynError::new(kw.span(), expected))?;
+    if !input.peek(token::Bracket) {
+        return Err(SynError::new(input.span(), expected));
+    }
+    let content;
+    bracketed!(content in input);
+    let names = Punctuated::<Ident, Token![,]>::parse_terminated(&content)?
+        .into_iter()
+        .map(|i| i.to_string())
+        .collect();
+    Ok(names)
+}
+
+fn parse_emits(input: ParseStream, kw: &Ident) -> Result<Vec<EventInfo>, SynError> {
+    let expected = "expected `emits = [(topic, EventType), ...]`";
+    input
+        .parse::<Token![=]>()
+        .map_err(|_| SynError::new(kw.span(), expected))?;
+    if !input.peek(token::Bracket) {
+        return Err(SynError::new(input.span(), expected));
+    }
+    let content;
+    bracketed!(content in input);
+    let tuples = Punctuated::<EventTuple, Token![,]>::parse_terminated(&content)?;
+    Ok(tuples
+        .into_iter()
+        .map(|t| EventInfo {
+            topic: t.topic,
+            data_type: t.data_type,
+        })
+        .collect())
+}
+
+struct EventTuple {
+    topic: String,
+    data_type: TokenStream2,
+}
+
+impl Parse for EventTuple {
+    fn parse(input: ParseStream) -> Result<Self, SynError> {
+        let content;
+        parenthesized!(content in input);
+        let topic = if content.peek(LitStr) {
+            let lit: LitStr = content.parse()?;
+            lit.value()
+        } else {
+            let path: Path = content.parse()?;
+            path.segments
+                .iter()
+                .map(|s| s.ident.to_string())
+                .collect::<Vec<_>>()
+                .join("::")
         };
-        if group.delimiter() != proc_macro2::Delimiter::Parenthesis {
-            continue;
+        content.parse::<Token![,]>()?;
+        let ty: Type = content.parse()?;
+        if !content.is_empty() {
+            return Err(content.error("expected `(topic, EventType)`"));
         }
-
-        if let Some((topic, data_type)) = parse_event_tuple(group.stream()) {
-            events.push((topic, data_type));
-        }
+        Ok(Self {
+            topic,
+            data_type: quote! { #ty },
+        })
     }
-
-    events
 }
 
-/// Parse a single event tuple: (topic, Type).
-fn parse_event_tuple(stream: proc_macro2::TokenStream) -> Option<(String, TokenStream2)> {
-    let mut iter = stream.into_iter().peekable();
-
-    // Extract topic (everything before the comma)
-    let topic = extract_topic_from_tokens(&mut iter)?;
-
-    // Skip the comma
-    while let Some(token) = iter.peek() {
-        if let proc_macro2::TokenTree::Punct(p) = token
-            && p.as_char() == ','
-        {
-            iter.next();
-            break;
-        }
-        iter.next();
-    }
-
-    // Remaining tokens are the data type
-    let data_type: TokenStream2 = iter.collect();
-    if data_type.is_empty() {
-        return None;
-    }
-
-    Some((topic, data_type))
-}
-
-/// Extract the topic string from the tokens before the comma.
-fn extract_topic_from_tokens(
-    iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>,
-) -> Option<String> {
-    let mut path_segments = Vec::new();
-
-    while let Some(token) = iter.peek() {
-        match token {
-            proc_macro2::TokenTree::Punct(p) if p.as_char() == ',' => {
-                // End of topic
-                break;
-            }
-            proc_macro2::TokenTree::Punct(p) if p.as_char() == ':' => {
-                // Part of path separator ::
-                iter.next();
-            }
-            proc_macro2::TokenTree::Ident(ident) => {
-                path_segments.push(ident.to_string());
-                iter.next();
-            }
-            proc_macro2::TokenTree::Literal(lit) => {
-                // String literal topic
-                let s = lit.to_string();
-                iter.next();
-                // Remove quotes from string literal
-                if s.starts_with('"') && s.ends_with('"') {
-                    return Some(s[1..s.len() - 1].to_string());
-                }
-                return Some(s);
-            }
-            _ => {
-                iter.next();
-            }
-        }
-    }
-
-    if path_segments.is_empty() {
-        None
-    } else {
-        Some(path_segments.join("::"))
+fn unknown_directive_msg(unknown: &str) -> String {
+    let suggestion = match unknown {
+        "emit" => Some("emits"),
+        "no_events" => Some("no_event"),
+        "exposes" => Some("expose"),
+        "feed" => Some("feeds"),
+        _ => None,
+    };
+    match suggestion {
+        Some(s) => format!("unknown contract directive `{unknown}`; did you mean `{s}`?"),
+        None => format!(
+            "unknown contract directive `{unknown}`; expected one of: feeds, expose, emits, no_event"
+        ),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use syn::ItemImpl;
+    use syn::{ImplItemFn, ItemImpl, parse_quote};
 
     use super::*;
 
-    #[test]
-    fn test_expose_list_simple() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            #[contract(expose = [owner, transfer_ownership])]
-            impl OwnableTrait for MyContract {
-                fn owner(&self) -> Address { self.owner }
-            }
-        };
-        let expose_list = expose_list(&impl_block.attrs);
-        assert!(expose_list.is_some());
-        let list = expose_list.unwrap();
-        assert_eq!(list.len(), 2);
-        assert!(list.contains(&"owner".to_string()));
-        assert!(list.contains(&"transfer_ownership".to_string()));
+    fn parse_impl(impl_block: &ItemImpl) -> Result<ContractDirectives, SynError> {
+        parse_contract_directives(&impl_block.attrs)
+    }
+
+    fn parse_method(method: &ImplItemFn) -> Result<ContractDirectives, SynError> {
+        parse_contract_directives(&method.attrs)
+    }
+
+    fn expect_err<T>(result: Result<T, SynError>) -> SynError {
+        match result {
+            Ok(_) => panic!("expected error"),
+            Err(e) => e,
+        }
     }
 
     #[test]
-    fn test_expose_list_single() {
-        let impl_block: ItemImpl = syn::parse_quote! {
+    fn empty_attrs_yield_default() {
+        let impl_block: ItemImpl = parse_quote! {
+            impl Foo for MyContract {}
+        };
+        let d = parse_impl(&impl_block).unwrap();
+        assert!(d.feeds.is_none());
+        assert!(d.expose.is_none());
+        assert!(d.emits.is_none());
+        assert!(!d.no_event);
+    }
+
+    #[test]
+    fn unrelated_attribute_passes_through() {
+        let method: ImplItemFn = parse_quote! {
+            #[doc = "hello"]
+            #[allow(dead_code)]
+            #[cfg(test)]
+            fn foo(&self) {}
+        };
+        let d = parse_method(&method).unwrap();
+        assert!(d.feeds.is_none());
+        assert!(d.expose.is_none());
+        assert!(d.emits.is_none());
+        assert!(!d.no_event);
+    }
+
+    #[test]
+    fn parses_feeds() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(feeds = "MyType")]
+            fn stream(&self) {}
+        };
+        let d = parse_method(&method).unwrap();
+        let feeds = d.feeds.expect("feeds field set");
+        assert_eq!(feeds.to_string().replace(' ', ""), "MyType");
+    }
+
+    #[test]
+    fn parses_feeds_generic_type() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(feeds = "Vec<u8>")]
+            fn stream(&self) {}
+        };
+        let d = parse_method(&method).unwrap();
+        let feeds = d.feeds.expect("feeds field set");
+        assert_eq!(feeds.to_string().replace(' ', ""), "Vec<u8>");
+    }
+
+    #[test]
+    fn parses_expose() {
+        let impl_block: ItemImpl = parse_quote! {
+            #[contract(expose = [owner, transfer_ownership])]
+            impl OwnableTrait for MyContract {}
+        };
+        let d = parse_impl(&impl_block).unwrap();
+        let expose = d.expose.expect("expose field set");
+        assert_eq!(
+            expose,
+            vec!["owner".to_string(), "transfer_ownership".to_string()]
+        );
+    }
+
+    #[test]
+    fn parses_expose_single_method() {
+        let impl_block: ItemImpl = parse_quote! {
             #[contract(expose = [version])]
             impl ISemver for MyContract {}
         };
-        let expose_list = expose_list(&impl_block.attrs);
-        assert!(expose_list.is_some());
-        let list = expose_list.unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0], "version");
+        let d = parse_impl(&impl_block).unwrap();
+        assert_eq!(d.expose.unwrap(), vec!["version".to_string()]);
     }
 
     #[test]
-    fn test_expose_list_none() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl OwnableTrait for MyContract {
-                fn owner(&self) -> Address { self.owner }
-            }
+    fn parses_emits_path_topic() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(emits = [(events::OwnershipTransferred::TOPIC, events::OwnershipTransferred)])]
+            fn transfer(&mut self) {}
         };
-        let expose_list = expose_list(&impl_block.attrs);
-        assert!(expose_list.is_none());
+        let d = parse_method(&method).unwrap();
+        let emits = d.emits.expect("emits field set");
+        assert_eq!(emits.len(), 1);
+        assert_eq!(emits[0].topic, "events::OwnershipTransferred::TOPIC");
+        assert_eq!(
+            emits[0].data_type.to_string().replace(' ', ""),
+            "events::OwnershipTransferred"
+        );
     }
 
     #[test]
-    fn test_expose_list_other_attribute() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            #[derive(Debug)]
-            impl OwnableTrait for MyContract {
-                fn owner(&self) -> Address { self.owner }
-            }
+    fn parses_emits_string_topic() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(emits = [("custom_topic", MyEvent)])]
+            fn transfer(&mut self) {}
         };
-        let expose_list = expose_list(&impl_block.attrs);
-        assert!(expose_list.is_none());
+        let d = parse_method(&method).unwrap();
+        let emits = d.emits.expect("emits field set");
+        assert_eq!(emits.len(), 1);
+        assert_eq!(emits[0].topic, "custom_topic");
+    }
+
+    #[test]
+    fn parses_emits_multiple() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(emits = [
+                (events::A::TOPIC, events::A),
+                ("b_topic", B),
+            ])]
+            fn act(&mut self) {}
+        };
+        let d = parse_method(&method).unwrap();
+        let emits = d.emits.unwrap();
+        assert_eq!(emits.len(), 2);
+        assert_eq!(emits[0].topic, "events::A::TOPIC");
+        assert_eq!(emits[1].topic, "b_topic");
+    }
+
+    #[test]
+    fn parses_no_event() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(no_event)]
+            fn touch(&mut self) {}
+        };
+        let d = parse_method(&method).unwrap();
+        assert!(d.no_event);
+    }
+
+    #[test]
+    fn parses_all_four_directives_in_one_attribute() {
+        // The four supported directives can all coexist inside a single
+        // `#[contract(...)]` invocation.
+        let impl_block: ItemImpl = parse_quote! {
+            #[contract(feeds = "Stream", expose = [m], emits = [("t", E)], no_event)]
+            impl Trait for MyContract {}
+        };
+        let d = parse_impl(&impl_block).unwrap();
+        assert!(d.feeds.is_some());
+        assert_eq!(d.expose.unwrap(), vec!["m".to_string()]);
+        assert_eq!(d.emits.unwrap().len(), 1);
+        assert!(d.no_event);
+    }
+
+    #[test]
+    fn aggregates_directives_across_multiple_attributes() {
+        // Two `#[contract(...)]` attributes on the same item are folded
+        // together into a single `ContractDirectives`.
+        let impl_block: ItemImpl = parse_quote! {
+            #[contract(expose = [m])]
+            #[contract(emits = [("t", E)])]
+            impl Trait for MyContract {}
+        };
+        let d = parse_impl(&impl_block).unwrap();
+        assert_eq!(d.expose.unwrap(), vec!["m".to_string()]);
+        assert_eq!(d.emits.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn parses_feeds_in_any_position() {
+        // `feeds` must be recognised regardless of position within the
+        // directive list.
+        let method: ImplItemFn = parse_quote! {
+            #[contract(no_event, feeds = "T")]
+            fn act(&mut self) {}
+        };
+        let d = parse_method(&method).unwrap();
+        assert!(d.no_event);
+        assert!(d.feeds.is_some());
+    }
+
+    #[test]
+    fn feeds_value_containing_no_event_does_not_suppress() {
+        // `no_event` is only set when it appears as a directive keyword,
+        // never when the literal text "no_event" appears inside another
+        // directive's value.
+        let method: ImplItemFn = parse_quote! {
+            #[contract(feeds = "Foo_no_event")]
+            fn act(&self) {}
+        };
+        let d = parse_method(&method).unwrap();
+        assert!(!d.no_event);
+        assert!(d.feeds.is_some());
+    }
+
+    #[test]
+    fn err_unknown_directive() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(no_events)]
+            fn act(&mut self) {}
+        };
+        let err = expect_err(parse_method(&method));
+        let msg = err.to_string();
+        assert!(msg.contains("unknown contract directive"), "got: {msg}");
+        assert!(msg.contains("no_events"), "got: {msg}");
+    }
+
+    #[test]
+    fn err_unknown_directive_lists_valid_keywords() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(bogus = 1)]
+            fn act(&self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(msg.contains("feeds"), "got: {msg}");
+        assert!(msg.contains("expose"), "got: {msg}");
+        assert!(msg.contains("emits"), "got: {msg}");
+        assert!(msg.contains("no_event"), "got: {msg}");
+    }
+
+    #[test]
+    fn err_unknown_directive_suggests_emits_for_emit() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(emit = [("t", E)])]
+            fn act(&mut self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(msg.contains("did you mean"), "got: {msg}");
+        assert!(msg.contains("emits"), "got: {msg}");
+    }
+
+    #[test]
+    fn err_feeds_without_value() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(feeds)]
+            fn act(&self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(msg.contains("feeds"), "got: {msg}");
+        assert!(msg.contains("TypeName"), "got: {msg}");
+    }
+
+    #[test]
+    fn err_feeds_non_string_value() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(feeds = SomeType)]
+            fn act(&self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(msg.contains("feeds"), "got: {msg}");
+        assert!(msg.contains("TypeName"), "got: {msg}");
+    }
+
+    #[test]
+    fn err_feeds_unparseable_type() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(feeds = "fn(")]
+            fn act(&self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(
+            msg.contains("not a valid Rust type"),
+            "expected type-validation error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn err_expose_with_parens() {
+        let impl_block: ItemImpl = parse_quote! {
+            #[contract(expose = (owner, version))]
+            impl Foo for MyContract {}
+        };
+        let msg = expect_err(parse_impl(&impl_block)).to_string();
+        assert!(msg.contains("expose"), "got: {msg}");
+        assert!(msg.contains("[m1"), "got: {msg}");
+    }
+
+    #[test]
+    fn err_emits_tuple_missing_comma() {
+        // Single-element tuple — the parser walks past the topic, then fails
+        // when expecting `,` before the data type.
+        let method: ImplItemFn = parse_quote! {
+            #[contract(emits = [(BadShape)])]
+            fn act(&mut self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(
+            msg.contains(','),
+            "error should mention the missing `,`, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn err_emits_tuple_not_parenthesized() {
+        // The list contents must be tuples; a bare ident fails the
+        // `parenthesized!` step inside `EventTuple::parse`.
+        let method: ImplItemFn = parse_quote! {
+            #[contract(emits = [BadShape])]
+            fn act(&mut self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(
+            msg.contains("parenthes"),
+            "error should mention the missing parentheses, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn err_emits_tuple_missing_data_type() {
+        // Trailing comma after the topic — the parser walks past the topic
+        // and the comma, then fails when expecting a type for `data_type`.
+        let method: ImplItemFn = parse_quote! {
+            #[contract(emits = [("topic",)])]
+            fn act(&mut self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(
+            msg.contains("type") || msg.contains("expected"),
+            "error should describe the missing type, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn err_emits_tuple_extra_tokens() {
+        // The tuple is `(topic, EventType)` — anything trailing must be
+        // rejected, not silently dropped.
+        let method: ImplItemFn = parse_quote! {
+            #[contract(emits = [("topic", EventType, Extra)])]
+            fn act(&mut self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(
+            msg.contains("topic, EventType"),
+            "error should describe the expected tuple shape, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn err_duplicate_feeds_within_one_attribute() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(feeds = "A", feeds = "B")]
+            fn act(&self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(msg.contains("duplicate"), "got: {msg}");
+        assert!(msg.contains("feeds"), "got: {msg}");
+    }
+
+    #[test]
+    fn err_duplicate_emits_across_attributes() {
+        // Duplicates across `#[contract(...)]` attributes must error too —
+        // otherwise the first list is silently dropped.
+        let method: ImplItemFn = parse_quote! {
+            #[contract(emits = [("a", A)])]
+            #[contract(emits = [("b", B)])]
+            fn act(&mut self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(msg.contains("duplicate"), "got: {msg}");
+        assert!(msg.contains("emits"), "got: {msg}");
+    }
+
+    #[test]
+    fn err_duplicate_no_event() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(no_event, no_event)]
+            fn act(&mut self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(msg.contains("duplicate"), "got: {msg}");
+        assert!(msg.contains("no_event"), "got: {msg}");
     }
 }

@@ -13,12 +13,9 @@ use std::collections::HashSet;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::visit::Visit;
-use syn::{
-    Attribute, Expr, ExprCall, ExprLit, ExprPath, ImplItem, ImplItemFn, ItemImpl, Lit, Visibility,
-};
+use syn::{Expr, ExprCall, ExprLit, ExprPath, ImplItemFn, ItemImpl, Lit};
 
-use crate::parse::directives;
-use crate::{EventInfo, TraitImplInfo};
+use crate::EventInfo;
 
 /// Visitor to find `abi::emit()` calls within function bodies.
 struct EmitVisitor {
@@ -259,62 +256,6 @@ pub(super) fn method_has_emit_call(method: &ImplItemFn) -> bool {
     !visitor.events.is_empty()
 }
 
-/// Extract events from a method's `#[contract(emits = [...])]` attribute.
-///
-/// Returns the events registered on this specific method, or an empty vec if
-/// none.
-pub(super) fn method_emits(attrs: &[Attribute]) -> Vec<EventInfo> {
-    directives::emits_list(attrs)
-        .map(|events| {
-            events
-                .into_iter()
-                .map(|(topic, data_type)| EventInfo { topic, data_type })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Collect events from method-level `#[contract(emits = [...])]` attributes
-/// on the methods of an impl block, restricted to those matching `include`.
-fn impl_method_emits<F>(impl_block: &ItemImpl, mut include: F) -> Vec<EventInfo>
-where
-    F: FnMut(&ImplItemFn) -> bool,
-{
-    let mut events = Vec::new();
-    for item in &impl_block.items {
-        if let ImplItem::Fn(method) = item
-            && include(method)
-        {
-            events.extend(method_emits(&method.attrs));
-        }
-    }
-    events
-}
-
-/// Extract events from method-level `#[contract(emits = [...])]` attributes in
-/// a trait impl.
-///
-/// Only methods in the `expose_list` are checked for emits attributes.
-pub(crate) fn trait_method_emits(trait_impl: &TraitImplInfo) -> Vec<EventInfo> {
-    impl_method_emits(trait_impl.impl_block, |method| {
-        trait_impl
-            .expose_list
-            .contains(&method.sig.ident.to_string())
-    })
-}
-
-/// Extract events from method-level `#[contract(emits = [...])]` attributes in
-/// an inherent impl block.
-///
-/// Only public methods (excluding `new`) are checked, matching the set of
-/// methods exposed as contract functions by
-/// [`super::functions::public_methods`].
-pub(crate) fn inherent_method_emits(impl_block: &ItemImpl) -> Vec<EventInfo> {
-    impl_method_emits(impl_block, |method| {
-        matches!(method.vis, Visibility::Public(_)) && method.sig.ident != "new"
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -544,8 +485,8 @@ mod tests {
         // End-to-end through the extract layer: build an impl block where two
         // public methods carry `#[contract(emits = [...])]` attributes that
         // share a topic but supply different data types. The macro pipeline
-        // (inherent_method_emits → dedup_events_by_topic) keeps the first
-        // occurrence and drops the rest.
+        // (public_methods → dedup_events_by_topic) keeps the first occurrence
+        // and drops the rest.
         let impl_block: ItemImpl = syn::parse_quote! {
             impl MyContract {
                 #[contract(emits = [(SHARED::TOPIC, FirstEvent)])]
@@ -556,7 +497,7 @@ mod tests {
             }
         };
 
-        let collected = inherent_method_emits(&impl_block);
+        let (_methods, collected) = super::super::functions::public_methods(&impl_block).unwrap();
         assert_eq!(
             collected.len(),
             2,
@@ -674,53 +615,5 @@ mod tests {
         assert_eq!(events.len(), 2, "distinct topics are not collapsed");
         let topics: Vec<_> = events.iter().map(|e| e.topic.as_str()).collect();
         assert_eq!(topics, vec!["topic_a", "topic_b"]);
-    }
-
-    // ========================================================================
-    // trait_method_emits / inherent_method_emits tests
-    // ========================================================================
-
-    #[test]
-    fn test_trait_method_emits_collects_events() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            #[contract(expose = [transfer_ownership])]
-            impl OwnableTrait for MyContract {
-                #[contract(emits = [(Transferred::TOPIC, Transferred)])]
-                fn transfer_ownership(&mut self) {}
-
-                // Not in expose list — should be ignored even with emits.
-                #[contract(emits = [(Hidden::TOPIC, Hidden)])]
-                fn unexposed(&mut self) {}
-            }
-        };
-        let trait_impl = TraitImplInfo {
-            trait_name: "OwnableTrait".to_string(),
-            impl_block: &impl_block,
-            expose_list: vec!["transfer_ownership".to_string()],
-        };
-        let events = trait_method_emits(&trait_impl);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].topic, "Transferred::TOPIC");
-    }
-
-    #[test]
-    fn test_inherent_method_emits_collects_events() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                #[contract(emits = [(Resolved::TOPIC, Resolved)])]
-                pub fn resolve(&mut self) { self.core.resolve(); }
-
-                // Private method — should be ignored.
-                #[contract(emits = [(Hidden::TOPIC, Hidden)])]
-                fn private_helper(&mut self) { self.core.hidden(); }
-
-                // Constructor — should be ignored even if it carries emits.
-                #[contract(emits = [(New::TOPIC, New)])]
-                pub fn new() -> Self { Self }
-            }
-        };
-        let events = inherent_method_emits(&impl_block);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].topic, "Resolved::TOPIC");
     }
 }
