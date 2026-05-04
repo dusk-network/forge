@@ -213,7 +213,10 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
         events.extend(parse::emit_calls(impl_block));
         // Include events from method-level #[contract(emits = [...])] attributes
-        events.extend(parse::inherent_method_emits(impl_block));
+        match parse::inherent_method_emits(impl_block) {
+            Ok(method_events) => events.extend(method_events),
+            Err(e) => return e.to_compile_error().into(),
+        }
     }
 
     // Extract functions and events from trait impl blocks with expose lists
@@ -224,7 +227,10 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
         events.extend(parse::emit_calls(trait_impl.impl_block));
         // Include events from method-level #[contract(emits = [...])] attributes
-        events.extend(parse::trait_method_emits(trait_impl));
+        match parse::trait_method_emits(trait_impl) {
+            Ok(method_events) => events.extend(method_events),
+            Err(e) => return e.to_compile_error().into(),
+        }
     }
 
     // Deduplicate events by topic — first-seen wins.

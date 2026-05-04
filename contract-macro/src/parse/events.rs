@@ -262,21 +262,16 @@ pub(super) fn method_has_emit_call(method: &ImplItemFn) -> bool {
 /// Extract events from a method's `#[contract(emits = [...])]` attribute.
 ///
 /// Returns the events registered on this specific method, or an empty vec if
-/// none.
-pub(super) fn method_emits(attrs: &[Attribute]) -> Vec<EventInfo> {
-    directives::emits_list(attrs)
-        .map(|events| {
-            events
-                .into_iter()
-                .map(|(topic, data_type)| EventInfo { topic, data_type })
-                .collect()
-        })
-        .unwrap_or_default()
+/// none. Errors if a `#[contract(...)]` attribute on the method is malformed.
+pub(super) fn method_emits(attrs: &[Attribute]) -> Result<Vec<EventInfo>, syn::Error> {
+    Ok(directives::parse_contract_directives(attrs)?
+        .emits
+        .unwrap_or_default())
 }
 
 /// Collect events from method-level `#[contract(emits = [...])]` attributes
 /// on the methods of an impl block, restricted to those matching `include`.
-fn impl_method_emits<F>(impl_block: &ItemImpl, mut include: F) -> Vec<EventInfo>
+fn impl_method_emits<F>(impl_block: &ItemImpl, mut include: F) -> Result<Vec<EventInfo>, syn::Error>
 where
     F: FnMut(&ImplItemFn) -> bool,
 {
@@ -285,17 +280,17 @@ where
         if let ImplItem::Fn(method) = item
             && include(method)
         {
-            events.extend(method_emits(&method.attrs));
+            events.extend(method_emits(&method.attrs)?);
         }
     }
-    events
+    Ok(events)
 }
 
 /// Extract events from method-level `#[contract(emits = [...])]` attributes in
 /// a trait impl.
 ///
 /// Only methods in the `expose_list` are checked for emits attributes.
-pub(crate) fn trait_method_emits(trait_impl: &TraitImplInfo) -> Vec<EventInfo> {
+pub(crate) fn trait_method_emits(trait_impl: &TraitImplInfo) -> Result<Vec<EventInfo>, syn::Error> {
     impl_method_emits(trait_impl.impl_block, |method| {
         trait_impl
             .expose_list
@@ -309,7 +304,7 @@ pub(crate) fn trait_method_emits(trait_impl: &TraitImplInfo) -> Vec<EventInfo> {
 /// Only public methods (excluding `new`) are checked, matching the set of
 /// methods exposed as contract functions by
 /// [`super::functions::public_methods`].
-pub(crate) fn inherent_method_emits(impl_block: &ItemImpl) -> Vec<EventInfo> {
+pub(crate) fn inherent_method_emits(impl_block: &ItemImpl) -> Result<Vec<EventInfo>, syn::Error> {
     impl_method_emits(impl_block, |method| {
         matches!(method.vis, Visibility::Public(_)) && method.sig.ident != "new"
     })
@@ -556,7 +551,7 @@ mod tests {
             }
         };
 
-        let collected = inherent_method_emits(&impl_block);
+        let collected = inherent_method_emits(&impl_block).unwrap();
         assert_eq!(
             collected.len(),
             2,
@@ -698,7 +693,7 @@ mod tests {
             impl_block: &impl_block,
             expose_list: vec!["transfer_ownership".to_string()],
         };
-        let events = trait_method_emits(&trait_impl);
+        let events = trait_method_emits(&trait_impl).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].topic, "Transferred::TOPIC");
     }
@@ -719,7 +714,7 @@ mod tests {
                 pub fn new() -> Self { Self }
             }
         };
-        let events = inherent_method_emits(&impl_block);
+        let events = inherent_method_emits(&impl_block).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].topic, "Resolved::TOPIC");
     }

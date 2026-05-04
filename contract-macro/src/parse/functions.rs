@@ -141,12 +141,14 @@ pub(crate) fn trait_methods(trait_impl: &TraitImplInfo) -> Result<Vec<FunctionIn
 
             let name = method.sig.ident.clone();
             let doc = extract_doc_comment(&method.attrs);
-            let feed_type = directives::extract_feeds_attribute(&method.attrs);
+            let method_directives = directives::parse_contract_directives(&method.attrs)?;
+            let feed_type = method_directives.feeds.clone();
+            let suppressed = method_directives.no_event;
+            let has_method_emits = method_directives
+                .emits
+                .as_ref()
+                .is_some_and(|events| !events.is_empty());
             let receiver = extract_receiver(method);
-
-            // Check for method-level emits attribute
-            let method_events = events::method_emits(&method.attrs);
-            let has_method_emits = !method_events.is_empty();
 
             // For trait methods:
             // - Default impl (empty body): check if emits attribute registered on method
@@ -156,7 +158,6 @@ pub(crate) fn trait_methods(trait_impl: &TraitImplInfo) -> Result<Vec<FunctionIn
             } else {
                 events::method_has_emit_call(method)
             };
-            let suppressed = directives::event_suppressed(&method.attrs);
 
             // Validate feed-related attributes
             // (only check non-empty bodies since empty bodies delegate to trait defaults)
@@ -238,11 +239,15 @@ pub(crate) fn public_methods(impl_block: &ItemImpl) -> Result<Vec<FunctionInfo>,
 
             let name = method.sig.ident.clone();
             let doc = extract_doc_comment(&method.attrs);
-            let feed_type = directives::extract_feeds_attribute(&method.attrs);
+            let method_directives = directives::parse_contract_directives(&method.attrs)?;
+            let feed_type = method_directives.feeds.clone();
+            let suppressed = method_directives.no_event;
+            let has_method_emits = method_directives
+                .emits
+                .as_ref()
+                .is_some_and(|events| !events.is_empty());
             let receiver = extract_receiver(method);
             let has_emit_call = events::method_has_emit_call(method);
-            let suppressed = directives::event_suppressed(&method.attrs);
-            let has_method_emits = !events::method_emits(&method.attrs).is_empty();
 
             // Validate feed-related attributes
             validate_feeds(method, &name, feed_type.as_ref())?;

@@ -59,7 +59,7 @@ pub(crate) fn contract_data<'a>(
     validate::new_constructor(&name, &impl_blocks, struct_)?;
     validate::init_method(&name, &impl_blocks)?;
 
-    let trait_impls = module::trait_impls(items, &name);
+    let trait_impls = module::trait_impls(items, &name)?;
 
     Ok(ContractData {
         imports,
