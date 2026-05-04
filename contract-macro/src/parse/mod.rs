@@ -25,9 +25,7 @@ mod functions;
 mod imports;
 mod module;
 
-pub(crate) use events::{
-    dedup_events_by_topic, emit_calls, inherent_method_emits, trait_method_emits,
-};
+pub(crate) use events::{dedup_events_by_topic, emit_calls};
 pub(crate) use functions::{public_methods, trait_methods};
 use syn::{Item, ItemMod};
 

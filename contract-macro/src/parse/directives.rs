@@ -394,15 +394,32 @@ mod tests {
     }
 
     #[test]
-    fn parses_combined_directives() {
-        let method: ImplItemFn = parse_quote! {
-            #[contract(feeds = "Stream", emits = [("t", E)], no_event)]
-            fn act(&mut self) {}
+    fn parses_all_four_directives_in_one_attribute() {
+        // The four supported directives can all coexist inside a single
+        // `#[contract(...)]` invocation.
+        let impl_block: ItemImpl = parse_quote! {
+            #[contract(feeds = "Stream", expose = [m], emits = [("t", E)], no_event)]
+            impl Trait for MyContract {}
         };
-        let d = parse_method(&method).unwrap();
+        let d = parse_impl(&impl_block).unwrap();
         assert!(d.feeds.is_some());
+        assert_eq!(d.expose.unwrap(), vec!["m".to_string()]);
         assert_eq!(d.emits.unwrap().len(), 1);
         assert!(d.no_event);
+    }
+
+    #[test]
+    fn aggregates_directives_across_multiple_attributes() {
+        // Two `#[contract(...)]` attributes on the same item are folded
+        // together into a single `ContractDirectives`.
+        let impl_block: ItemImpl = parse_quote! {
+            #[contract(expose = [m])]
+            #[contract(emits = [("t", E)])]
+            impl Trait for MyContract {}
+        };
+        let d = parse_impl(&impl_block).unwrap();
+        assert_eq!(d.expose.unwrap(), vec!["m".to_string()]);
+        assert_eq!(d.emits.unwrap().len(), 1);
     }
 
     #[test]
@@ -515,18 +532,48 @@ mod tests {
     }
 
     #[test]
-    fn err_emits_malformed_tuple() {
+    fn err_emits_tuple_missing_comma() {
+        // Single-element tuple — the parser walks past the topic, then fails
+        // when expecting `,` before the data type.
         let method: ImplItemFn = parse_quote! {
             #[contract(emits = [(BadShape)])]
             fn act(&mut self) {}
         };
-        // Missing comma inside the tuple — parser should error on the
-        // expected `,` in the tuple.
-        let err = expect_err(parse_method(&method));
-        // We only require some error; the specific message comes from
-        // syn's tuple parsing. Sanity-check it's not silently dropped.
-        let msg = err.to_string();
-        assert!(!msg.is_empty(), "expected error for malformed tuple");
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(
+            msg.contains(','),
+            "error should mention the missing `,`, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn err_emits_tuple_not_parenthesized() {
+        // The list contents must be tuples; a bare ident fails the
+        // `parenthesized!` step inside `EventTuple::parse`.
+        let method: ImplItemFn = parse_quote! {
+            #[contract(emits = [BadShape])]
+            fn act(&mut self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(
+            msg.contains("parenthes"),
+            "error should mention the missing parentheses, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn err_emits_tuple_missing_data_type() {
+        // Trailing comma after the topic — the parser walks past the topic
+        // and the comma, then fails when expecting a type for `data_type`.
+        let method: ImplItemFn = parse_quote! {
+            #[contract(emits = [("topic",)])]
+            fn act(&mut self) {}
+        };
+        let msg = expect_err(parse_method(&method)).to_string();
+        assert!(
+            msg.contains("type") || msg.contains("expected"),
+            "error should describe the missing type, got: {msg}"
+        );
     }
 
     #[test]
