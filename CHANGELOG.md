@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Pin Dusk workspace, template, and test-contract dependencies to the explicit `1.6.0` release constraint.
 - Replace the four hand-rolled `#[contract(...)]` directive parsers with a single typed pass returning a `ContractDirectives` struct. Malformed inputs (typo'd keyword, wrong shape, unparseable feeds type, `expose = (...)` with parens, extra tokens after a `(topic, EventType)` tuple) now produce a `compile_error!` instead of being silently dropped. Duplicate directives (within one attribute or across multiple `#[contract(...)]` attributes on the same item) also error [#24].
 - Move workspace to Rust edition 2024 on the stable toolchain (MSRV 1.85). Generated contract wrappers now use `#[unsafe(no_mangle)]`.
 - Remove `-Z build-std=core,alloc` from contract builds (no longer needed on stable).

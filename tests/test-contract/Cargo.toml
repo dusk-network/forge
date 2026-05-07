@@ -16,7 +16,7 @@ types = { path = "../types" }
 ff = { version = "0.13", default-features = false }
 rand = "0.8"
 rkyv = { workspace = true, features = ["validation"] }
-rusk-prover = { version = "1.6", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0" }
+rusk-prover = { version = "1.6.0", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0" }
 serde_json = { workspace = true, default-features = true }
 wasmtime = "25"
 

@@ -32,7 +32,7 @@ rust-version = "1.85"
 # Workspace internal dependencies
 dusk-forge-contract = { version = "0.1.1", path = "./contract-macro/" }
 
-dusk-core = { version = "1.6", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0" }
+dusk-core = { version = "1.6.0", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0" }
 bytecheck = { version = "0.6.12", default-features = false }
 rkyv = { version = "0.7", default-features = false, features = [
   "alloc",
@@ -59,7 +59,7 @@ wasmtime = "25"
 blake3 = "1"
 
 # Pin to match L1Contracts versions
-dusk-vm = { version = "1.6", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0", default-features = false }
+dusk-vm = { version = "1.6.0", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0", default-features = false }
 
 # Enable overflow checks in release builds for contract safety
 [profile.release]
