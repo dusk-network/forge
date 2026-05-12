@@ -124,7 +124,7 @@ fn validate_feeds(
 /// the macro will generate wrappers that call the trait method directly. The
 /// returned event vector is the union of `#[contract(emits = [...])]`
 /// registrations across the exposed methods.
-pub(crate) fn trait_methods(
+pub(super) fn trait_methods(
     trait_impl: &TraitImplInfo,
 ) -> Result<(Vec<FunctionInfo>, Vec<EventInfo>), syn::Error> {
     let mut functions = Vec::new();
@@ -229,7 +229,7 @@ pub(crate) fn trait_methods(
 /// `#[contract(feeds = "Type")]` attribute. The returned event vector is the
 /// union of `#[contract(emits = [...])]` registrations across the public
 /// methods.
-pub(crate) fn public_methods(
+pub(super) fn public_methods(
     impl_block: &ItemImpl,
 ) -> Result<(Vec<FunctionInfo>, Vec<EventInfo>), syn::Error> {
     let mut functions = Vec::new();
