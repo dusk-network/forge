@@ -19,8 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Replace the four hand-rolled `#[contract(...)]` directive parsers with a single typed pass returning a `ContractDirectives` struct. Malformed inputs (typo'd keyword, wrong shape, unparseable feeds type, `expose = (...)` with parens, extra tokens after a `(topic, EventType)` tuple) now produce a `compile_error!` instead of being silently dropped. Duplicate directives (within one attribute or across multiple `#[contract(...)]` attributes on the same item) also error [#24].
-- Restructure the contract-macro parse phase. Parse-phase IR types (`FunctionInfo`, `ParameterInfo`, `Receiver`, `EventInfo`, `ImportInfo`, `TraitImplInfo`) move into `parse::model`. A new `parse::analyze` entry point runs the full walk, merges body-discovered and attribute-declared events, deduplicates by topic, and returns an owned `Analysis` — `lib.rs` is now a thin entry point with no orchestration loops or IR types of its own. Happy-path macro expansion is byte-identical.
-- Pin the strict parse stance with compile-fail fixtures for a bare `#[contract]` (no parens) on an inner item, duplicate directive keys within a single `#[contract(...)]` attribute, and duplicate directive keys across multiple `#[contract(...)]` attributes on the same item.
+- Restructure the contract-macro parse phase (internal — no public API or generated-code changes) [#27].
 - Move workspace to Rust edition 2024 on the stable toolchain (MSRV 1.85). Generated contract wrappers now use `#[unsafe(no_mangle)]`.
 - Remove `-Z build-std=core,alloc` from contract builds (no longer needed on stable).
 - Replace EVM-flavored test-bridge with a general-purpose test contract that exercises every `#[contract]` macro code path without domain-specific types.
@@ -87,6 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#3]: https://github.com/dusk-network/forge/issues/3
 [#6]: https://github.com/dusk-network/forge/issues/6
 [#24]: https://github.com/dusk-network/forge/issues/24
+[#27]: https://github.com/dusk-network/forge/issues/27
 
 <!-- Releases -->
 [Unreleased]: https://github.com/dusk-network/forge/compare/v0.2.1...HEAD
