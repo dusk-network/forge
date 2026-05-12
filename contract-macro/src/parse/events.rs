@@ -15,7 +15,7 @@ use quote::quote;
 use syn::visit::Visit;
 use syn::{Expr, ExprCall, ExprLit, ExprPath, ImplItemFn, ItemImpl, Lit};
 
-use crate::EventInfo;
+use super::model::EventInfo;
 
 /// Visitor to find `abi::emit()` calls within function bodies.
 struct EmitVisitor {

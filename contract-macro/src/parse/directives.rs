@@ -19,7 +19,7 @@ use syn::{
     parse_str, parse2, token,
 };
 
-use crate::EventInfo;
+use super::model::EventInfo;
 
 /// Parsed `#[contract(...)]` directives, aggregated across every contract
 /// attribute on a given item.

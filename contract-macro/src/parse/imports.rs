@@ -8,7 +8,17 @@
 
 use syn::{ItemUse, UseTree};
 
-use crate::{ImportExtraction, ImportInfo};
+use super::model::ImportInfo;
+
+/// Result of extracting imports from a use statement.
+pub(super) struct ImportExtraction {
+    /// The extracted imports.
+    pub(super) imports: Vec<ImportInfo>,
+    /// Whether a glob import was found.
+    pub(super) has_glob: bool,
+    /// Whether a relative import was found.
+    pub(super) has_relative: bool,
+}
 
 /// Check if an identifier is a relative path keyword.
 fn is_relative_path_keyword(ident: &str) -> bool {

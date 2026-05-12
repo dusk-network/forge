@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use proc_macro2::TokenStream as TokenStream2;
 
-use crate::ImportInfo;
+use crate::parse::ImportInfo;
 
 /// A map from type names (as used in code) to their fully qualified paths.
 pub(crate) type TypeMap = HashMap<String, String>;
@@ -179,8 +179,8 @@ fn resolve_path_string(path: &str, import_map: &HashMap<String, String>) -> Stri
 /// resolved to their fully qualified paths.
 pub(crate) fn build_type_map(
     imports: &[ImportInfo],
-    functions: &[crate::FunctionInfo],
-    events: &[crate::EventInfo],
+    functions: &[crate::parse::FunctionInfo],
+    events: &[crate::parse::EventInfo],
 ) -> TypeMap {
     let import_map = build_import_map(imports);
     let mut type_map = TypeMap::new();
@@ -392,14 +392,14 @@ mod tests {
         // see the original token-string verbatim — the fallback string is
         // stored as the resolved value.
         let imports = vec![];
-        let func = crate::FunctionInfo {
+        let func = crate::parse::FunctionInfo {
             name: quote::format_ident!("malformed"),
             doc: None,
             params: vec![],
             input_type: quote! { let bad = 1 },
             output_type: quote! { () },
             returns_ref: false,
-            receiver: crate::Receiver::Ref,
+            receiver: crate::parse::Receiver::Ref,
             trait_name: None,
             feed_type: None,
         };

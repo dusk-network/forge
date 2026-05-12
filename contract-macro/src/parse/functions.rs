@@ -14,8 +14,9 @@ use syn::{
     Visibility,
 };
 
+use super::model::{EventInfo, FunctionInfo, ParameterInfo, Receiver, TraitImplInfo};
 use crate::parse::{directives, events};
-use crate::{EventInfo, FunctionInfo, ParameterInfo, Receiver, TraitImplInfo, validate};
+use crate::validate;
 
 /// Check if a method body is empty (just `{}`).
 ///

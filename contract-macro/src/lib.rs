@@ -10,6 +10,17 @@
 //! impl block. It extracts metadata about public methods and events, and
 //! generates a `CONTRACT_SCHEMA` constant plus extern "C" wrappers.
 //!
+//! # Pipeline
+//!
+//! 1. [`parse::analyze`] walks the user module and produces an
+//!    [`parse::Analysis`] (functions, deduplicated events, imports, contract
+//!    identifier).
+//! 2. [`generate`] / [`data_driver`] consume the analysis and emit the contract
+//!    or data-driver bindings.
+//!
+//! `lib.rs` only orchestrates these two phases — all walking, validation,
+//! and IR construction lives in the `parse` module.
+//!
 //! # Example
 //!
 //! ```ignore
@@ -44,118 +55,7 @@ mod resolve;
 mod validate;
 
 use proc_macro::TokenStream;
-use proc_macro2::{Ident, TokenStream as TokenStream2};
-use quote::quote;
-use syn::{Item, ItemImpl, ItemMod, Type, parse_macro_input};
-
-// ============================================================================
-// IR Data Structures
-// ============================================================================
-
-/// Information about an imported type.
-#[derive(Clone)]
-struct ImportInfo {
-    /// The short name used in the contract (e.g., `SetU64`).
-    name: String,
-    /// The full path to the type (e.g., `my_crate::MyType`).
-    path: String,
-}
-
-/// The receiver type of a method (self parameter).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Receiver {
-    /// No receiver - associated function.
-    None,
-    /// Immutable borrow: `&self`.
-    Ref,
-    /// Mutable borrow: `&mut self`.
-    RefMut,
-}
-
-/// Information about a function parameter.
-struct ParameterInfo {
-    /// The parameter name.
-    name: Ident,
-    /// The type (dereferenced if the parameter is a reference).
-    ty: TokenStream2,
-    /// Whether the parameter is a reference (requires `&` when passing to
-    /// method).
-    is_ref: bool,
-    /// Whether the parameter is a mutable reference.
-    is_mut_ref: bool,
-}
-
-/// Information about a contract function extracted from the impl block.
-struct FunctionInfo {
-    /// The function name.
-    name: Ident,
-    /// Documentation comment.
-    doc: Option<String>,
-    /// Function parameters.
-    params: Vec<ParameterInfo>,
-    /// The input type (tuple of parameter types or single type).
-    input_type: TokenStream2,
-    /// The output type (dereferenced if the method returns a reference).
-    output_type: TokenStream2,
-    /// Whether the method returns a reference (requires `.clone()` in wrapper).
-    returns_ref: bool,
-    /// The method's receiver type (`&self`, `&mut self`, or none).
-    receiver: Receiver,
-    /// For trait methods with empty bodies: the trait name to call the default
-    /// impl.
-    trait_name: Option<String>,
-    /// The type fed via `abi::feed()` for streaming functions (from
-    /// `#[contract(feeds = "Type")]`). When present, the data-driver uses
-    /// this type for `decode_output_fn` instead of `output_type`.
-    feed_type: Option<TokenStream2>,
-}
-
-/// Information about an event extracted from `abi::emit()` calls.
-#[derive(Clone)]
-struct EventInfo {
-    /// The event topic string.
-    topic: String,
-    /// The event data type.
-    data_type: TokenStream2,
-}
-
-/// Result of extracting imports from a use statement.
-struct ImportExtraction {
-    /// The extracted imports.
-    imports: Vec<ImportInfo>,
-    /// Whether a glob import was found.
-    has_glob: bool,
-    /// Whether a relative import was found.
-    has_relative: bool,
-}
-
-/// Information about a trait implementation with exposed methods.
-struct TraitImplInfo<'a> {
-    /// The name of the trait being implemented (for error messages).
-    trait_name: String,
-    /// The impl block itself.
-    impl_block: &'a ItemImpl,
-    /// List of method names to expose (from `#[contract(expose = [...])]`).
-    expose_list: Vec<String>,
-}
-
-/// Validated contract module data extracted during parsing.
-struct ContractData<'a> {
-    /// Imported types.
-    imports: Vec<ImportInfo>,
-    /// The contract struct name as a string.
-    contract_name: String,
-    /// The contract struct identifier.
-    contract_ident: Ident,
-    /// Inherent impl blocks for the contract.
-    impl_blocks: Vec<&'a ItemImpl>,
-    /// Trait implementations with `#[contract(expose = [...])]` attributes.
-    trait_impls: Vec<TraitImplInfo<'a>>,
-}
-
-// ============================================================================
-// Main Macro
-// ============================================================================
+use syn::{ItemMod, parse_macro_input};
 
 /// The main contract proc macro.
 ///
@@ -181,116 +81,16 @@ struct ContractData<'a> {
 pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let module = parse_macro_input!(item as ItemMod);
 
-    // Module must have content (not just a declaration)
     let Some((_, items)) = &module.content else {
         return syn::Error::new_spanned(&module, "#[contract] requires a module with content")
             .to_compile_error()
             .into();
     };
 
-    // Validate and extract contract data
-    let data = match parse::contract_data(&module, items) {
-        Ok(data) => data,
+    let analysis = match parse::analyze(&module, items) {
+        Ok(analysis) => analysis,
         Err(e) => return e.to_compile_error().into(),
     };
 
-    let ContractData {
-        imports,
-        contract_name,
-        contract_ident,
-        impl_blocks,
-        trait_impls,
-    } = data;
-
-    // Extract functions and events from all inherent impl blocks
-    let mut functions = Vec::new();
-    let mut events = Vec::new();
-
-    for impl_block in &impl_blocks {
-        let (methods, method_events) = match parse::public_methods(impl_block) {
-            Ok(result) => result,
-            Err(e) => return e.to_compile_error().into(),
-        };
-        functions.extend(methods);
-        events.extend(parse::emit_calls(impl_block));
-        events.extend(method_events);
-    }
-
-    // Extract functions and events from trait impl blocks with expose lists
-    for trait_impl in &trait_impls {
-        let (trait_functions, method_events) = match parse::trait_methods(trait_impl) {
-            Ok(result) => result,
-            Err(e) => return e.to_compile_error().into(),
-        };
-        functions.extend(trait_functions);
-        events.extend(parse::emit_calls(trait_impl.impl_block));
-        events.extend(method_events);
-    }
-
-    // Deduplicate events by topic — first-seen wins.
-    let events = parse::dedup_events_by_topic(events);
-
-    // Generate schema
-    let schema = generate::schema(&contract_name, &imports, &functions, &events);
-
-    // Generate static STATE variable
-    let state_static = generate::state_static(&contract_ident);
-
-    // Generate extern "C" wrappers
-    let externs = generate::extern_wrappers(&functions, &contract_ident);
-
-    // Build resolved type map for data_driver
-    let type_map = resolve::build_type_map(&imports, &functions, &events);
-
-    // Generate data_driver module at crate root level (outside contract module)
-    let data_driver = data_driver::module(&type_map, &functions, &events);
-
-    // Rebuild the module with stripped contract attributes on methods
-    let mod_vis = &module.vis;
-    let mod_name = &module.ident;
-    let mod_attrs = &module.attrs;
-
-    let new_items: Vec<_> = items
-        .iter()
-        .map(|item| {
-            if let Item::Impl(impl_block) = item
-                && let Type::Path(type_path) = &*impl_block.self_ty
-                && type_path.path.is_ident(&contract_name)
-            {
-                // Strip #[contract(...)] attributes from both inherent and trait impl blocks
-                Item::Impl(generate::strip_contract_attributes(impl_block.clone()))
-            } else {
-                item.clone()
-            }
-        })
-        .collect();
-
-    // Output:
-    // - Contract schema at crate root (always available)
-    // - Contract module wrapped in #[cfg(not(feature = "data-driver"))]
-    // - Data driver module at crate root with #[cfg(feature = "data-driver")]
-    let output = quote! {
-        #[cfg(not(any(feature = "contract", feature = "data-driver")))]
-        compile_error!("Enable either 'contract' or 'data-driver' feature for WASM builds");
-
-        #[cfg(all(feature = "contract", feature = "data-driver"))]
-        compile_error!("Features 'contract' and 'data-driver' are mutually exclusive");
-
-        #[cfg(any(feature = "contract", feature = "data-driver"))]
-        #schema
-
-        #[cfg(not(feature = "data-driver"))]
-        #(#mod_attrs)*
-        #mod_vis mod #mod_name {
-            #(#new_items)*
-
-            #state_static
-
-            #externs
-        }
-
-        #data_driver
-    };
-
-    output.into()
+    generate::contract_module(&module, items, &analysis).into()
 }

@@ -10,8 +10,8 @@
 
 use syn::{Item, ItemImpl, ItemMod, Type, Visibility};
 
+use super::model::{ImportInfo, TraitImplInfo};
 use crate::parse::{directives, imports as imports_parse};
-use crate::{ImportInfo, TraitImplInfo};
 
 /// Extract and validate imports from the module items.
 ///
