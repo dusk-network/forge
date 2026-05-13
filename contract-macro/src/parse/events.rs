@@ -15,7 +15,7 @@ use quote::quote;
 use syn::visit::Visit;
 use syn::{Expr, ExprCall, ExprLit, ExprPath, ImplItemFn, ItemImpl, Lit};
 
-use crate::EventInfo;
+use super::model::EventInfo;
 
 /// Visitor to find `abi::emit()` calls within function bodies.
 struct EmitVisitor {
@@ -159,7 +159,7 @@ pub(super) fn validate_feed_type_match(
 /// types collapse to the first-seen entry; the rest are dropped silently
 /// (no diagnostic, no panic). Iteration order is preserved, so the result
 /// is deterministic regardless of `HashSet`'s random seed.
-pub(crate) fn dedup_events_by_topic(events: Vec<EventInfo>) -> Vec<EventInfo> {
+pub(super) fn dedup_events_by_topic(events: Vec<EventInfo>) -> Vec<EventInfo> {
     let mut seen = HashSet::new();
     events
         .into_iter()
@@ -242,7 +242,7 @@ pub(super) fn type_from_expr(expr: &Expr) -> TokenStream2 {
 /// Extract all `abi::emit()` calls from an impl block.
 ///
 /// Events are deduplicated by topic, keeping only the first occurrence.
-pub(crate) fn emit_calls(impl_block: &ItemImpl) -> Vec<EventInfo> {
+pub(super) fn emit_calls(impl_block: &ItemImpl) -> Vec<EventInfo> {
     let mut visitor = EmitVisitor::new();
     visitor.visit_item_impl(impl_block);
 

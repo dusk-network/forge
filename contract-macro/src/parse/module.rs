@@ -10,8 +10,8 @@
 
 use syn::{Item, ItemImpl, ItemMod, Type, Visibility};
 
+use super::model::{ImportInfo, TraitImplInfo};
 use crate::parse::{directives, imports as imports_parse};
-use crate::{ImportInfo, TraitImplInfo};
 
 /// Extract and validate imports from the module items.
 ///
@@ -317,5 +317,31 @@ mod tests {
 
         let trait_impls = trait_impls(&items, "MyContract").unwrap();
         assert_eq!(trait_impls.len(), 2);
+    }
+
+    #[test]
+    fn test_trait_impls_propagates_directive_parse_error() {
+        // A malformed `#[contract(...)]` on a trait impl must surface as a
+        // `syn::Error` rather than being silently dropped or swallowed by the
+        // surrounding walk.
+        let items: Vec<Item> = vec![syn::parse_quote! {
+            #[contract(no_events)]
+            impl OwnableTrait for MyContract {
+                fn owner(&self) -> Address { self.owner }
+            }
+        }];
+
+        let Err(err) = trait_impls(&items, "MyContract") else {
+            panic!("expected directive parse error to propagate");
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknown contract directive"),
+            "error should be the directive parser's, got: {msg}"
+        );
+        assert!(
+            msg.contains("no_events"),
+            "error should mention the offending keyword: {msg}"
+        );
     }
 }

@@ -8,9 +8,83 @@
 
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
-use syn::{ImplItem, ItemImpl};
+use syn::{ImplItem, Item, ItemImpl, ItemMod, Type};
 
-use crate::{EventInfo, FunctionInfo, ImportInfo, ParameterInfo, Receiver};
+use crate::parse::{Analysis, EventInfo, FunctionInfo, ImportInfo, ParameterInfo, Receiver};
+use crate::{data_driver, resolve};
+
+/// Assemble the full proc-macro output: the schema, the contract module
+/// (with `#[contract(...)]` attributes stripped), and the data-driver module.
+///
+/// This is the single entry point `lib.rs` calls after `parse::analyze`.
+pub(crate) fn contract_module(
+    module: &ItemMod,
+    items: &[Item],
+    analysis: &Analysis,
+) -> TokenStream2 {
+    let Analysis {
+        contract_ident,
+        contract_name,
+        imports,
+        functions,
+        events,
+    } = analysis;
+
+    let schema = schema(contract_name, imports, functions, events);
+    let state_static = state_static(contract_ident);
+    let externs = extern_wrappers(functions, contract_ident);
+
+    let type_map = resolve::build_type_map(imports, functions, events);
+    let data_driver = data_driver::module(&type_map, functions, events);
+
+    let stripped_items = stripped_module_items(items, contract_name);
+
+    let mod_vis = &module.vis;
+    let mod_name = &module.ident;
+    let mod_attrs = &module.attrs;
+
+    quote! {
+        #[cfg(not(any(feature = "contract", feature = "data-driver")))]
+        compile_error!("Enable either 'contract' or 'data-driver' feature for WASM builds");
+
+        #[cfg(all(feature = "contract", feature = "data-driver"))]
+        compile_error!("Features 'contract' and 'data-driver' are mutually exclusive");
+
+        #[cfg(any(feature = "contract", feature = "data-driver"))]
+        #schema
+
+        #[cfg(not(feature = "data-driver"))]
+        #(#mod_attrs)*
+        #mod_vis mod #mod_name {
+            #(#stripped_items)*
+
+            #state_static
+
+            #externs
+        }
+
+        #data_driver
+    }
+}
+
+/// Clone the module items, replacing every inherent or trait impl block for
+/// the contract struct with a copy that has `#[contract(...)]` attributes
+/// stripped (see [`strip_contract_attributes`]).
+fn stripped_module_items(items: &[Item], contract_name: &str) -> Vec<Item> {
+    items
+        .iter()
+        .map(|item| {
+            if let Item::Impl(impl_block) = item
+                && let Type::Path(type_path) = &*impl_block.self_ty
+                && type_path.path.is_ident(contract_name)
+            {
+                Item::Impl(strip_contract_attributes(impl_block.clone()))
+            } else {
+                item.clone()
+            }
+        })
+        .collect()
+}
 
 /// Generate the argument expression for passing to the method.
 ///
@@ -265,7 +339,7 @@ pub(crate) fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ParameterInfo, Receiver};
+    use crate::parse::{ParameterInfo, Receiver};
 
     fn normalize_tokens(tokens: TokenStream2) -> String {
         tokens

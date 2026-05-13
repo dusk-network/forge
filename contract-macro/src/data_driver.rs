@@ -16,8 +16,8 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 
+use crate::parse::{EventInfo, FunctionInfo};
 use crate::resolve::TypeMap;
-use crate::{EventInfo, FunctionInfo};
 
 /// Generate the `data_driver` module at crate root level.
 pub(crate) fn module(
@@ -240,7 +240,7 @@ mod tests {
     use quote::format_ident;
 
     use super::*;
-    use crate::Receiver;
+    use crate::parse::Receiver;
 
     /// Normalize token stream to a string with consistent whitespace for
     /// comparison.
