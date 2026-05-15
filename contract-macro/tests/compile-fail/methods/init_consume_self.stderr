@@ -1,0 +1,5 @@
+error: `MyContract::init` must take `&mut self`; initialization needs to modify contract state
+  --> tests/compile-fail/methods/init_consume_self.rs:19:17
+   |
+19 |         fn init(self) {}
+   |                 ^^^^

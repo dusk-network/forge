@@ -1,3 +1,5 @@
+// Pins: parse::directives::duplicate_across_attributes
+//
 // Duplicate directive keys across multiple `#[contract(...)]` attributes on
 // the same item are rejected. This pins the strict parse stance against
 // silent last-attr-wins.

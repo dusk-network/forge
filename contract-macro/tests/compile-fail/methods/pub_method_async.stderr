@@ -1,0 +1,5 @@
+error: public method `fetch` cannot be async; WASM contracts do not support async execution
+  --> tests/compile-fail/methods/pub_method_async.rs:17:13
+   |
+17 |         pub async fn fetch(&self) -> u64 {
+   |             ^^^^^

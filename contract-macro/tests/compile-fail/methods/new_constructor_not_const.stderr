@@ -1,0 +1,5 @@
+error: `MyContract::new` must be a `const fn` to initialize the static STATE variable; add `const` to the function signature
+  --> tests/compile-fail/methods/new_constructor_not_const.rs:13:13
+   |
+13 |         pub fn new() -> Self {
+   |             ^^^^^^^^^^^^^^^^

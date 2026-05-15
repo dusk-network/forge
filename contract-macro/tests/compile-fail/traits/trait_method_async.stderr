@@ -1,0 +1,5 @@
+error: trait method `AsyncTrait::fetch` cannot be async; WASM contracts do not support async execution
+  --> tests/compile-fail/traits/trait_method_async.rs:20:9
+   |
+20 |         async fn fetch(&self) -> u64 {
+   |         ^^^^^

@@ -1,0 +1,5 @@
+error: public method `destroy` cannot consume `self`; use `&self` or `&mut self` instead
+  --> tests/compile-fail/methods/pub_method_consume_self.rs:18:24
+   |
+18 |         pub fn destroy(self) {}
+   |                        ^^^^

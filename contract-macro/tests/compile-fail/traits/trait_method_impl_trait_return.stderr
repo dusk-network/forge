@@ -1,0 +1,5 @@
+error: trait method `Collection::items` cannot use `impl Trait` as return type; extern "C" wrappers require concrete types
+  --> tests/compile-fail/traits/trait_method_impl_trait_return.rs:20:28
+   |
+20 |         fn items(&self) -> impl Iterator<Item = u64> {
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^

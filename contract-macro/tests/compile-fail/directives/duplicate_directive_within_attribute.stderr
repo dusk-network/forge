@@ -1,0 +1,5 @@
+error: duplicate `feeds` directive
+  --> tests/compile-fail/directives/duplicate_directive_within_attribute.rs:17:35
+   |
+17 |         #[contract(feeds = "u64", feeds = "u32")]
+   |                                   ^^^^^

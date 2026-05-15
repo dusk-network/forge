@@ -1,0 +1,5 @@
+error: public method `process` cannot have generic or const parameters; extern "C" wrappers require concrete types
+  --> tests/compile-fail/methods/pub_method_generic_params.rs:18:23
+   |
+18 |         pub fn process<T>(&self, value: T) -> T {
+   |                       ^^^

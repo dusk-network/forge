@@ -1,0 +1,5 @@
+error: `MyContract::new` must have no parameters; use `const fn new() -> Self` to create a default state
+  --> tests/compile-fail/methods/new_constructor_has_params.rs:14:26
+   |
+14 |         pub const fn new(seed: u64) -> Self {
+   |                          ^^^^^^^^^

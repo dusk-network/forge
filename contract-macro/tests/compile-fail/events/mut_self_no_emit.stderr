@@ -1,0 +1,5 @@
+error: public method `touch` mutates state but emits no events; add an `abi::emit()` call or suppress with `#[contract(no_event)]`
+  --> tests/compile-fail/events/mut_self_no_emit.rs:19:13
+   |
+19 |         pub fn touch(&mut self) {}
+   |             ^^^^^^^^^^^^^^^^^^^

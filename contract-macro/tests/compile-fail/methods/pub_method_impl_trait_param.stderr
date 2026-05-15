@@ -1,0 +1,5 @@
+error: public method `process` cannot use `impl Trait` in parameters; extern "C" wrappers require concrete types
+  --> tests/compile-fail/methods/pub_method_impl_trait_param.rs:18:40
+   |
+18 |         pub fn process(&self, handler: impl core::fmt::Display) {
+   |                                        ^^^^^^^^^^^^^^^^^^^^^^^

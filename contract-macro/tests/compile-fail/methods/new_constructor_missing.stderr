@@ -1,0 +1,5 @@
+error: #[contract] requires `MyContract` to have a `const fn new() -> Self` method to initialize the static STATE variable
+  --> tests/compile-fail/methods/new_constructor_missing.rs:10:5
+   |
+10 |     pub struct MyContract;
+   |     ^^^^^^^^^^^^^^^^^^^^^^

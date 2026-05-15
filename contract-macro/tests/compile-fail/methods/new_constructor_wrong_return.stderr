@@ -1,0 +1,5 @@
+error: `MyContract::new` must return `Self` or `MyContract`
+  --> tests/compile-fail/methods/new_constructor_wrong_return.rs:14:28
+   |
+14 |         pub const fn new() -> u64 {
+   |                            ^^^^^^

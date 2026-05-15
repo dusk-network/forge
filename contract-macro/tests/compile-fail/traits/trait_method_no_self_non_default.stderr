@@ -1,0 +1,5 @@
+error: trait method `Versioned::version` must have a `self` receiver; for associated functions, use an empty body `{}` to expose the default impl
+  --> tests/compile-fail/traits/trait_method_no_self_non_default.rs:22:9
+   |
+22 |         fn version() -> &'static str {
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
