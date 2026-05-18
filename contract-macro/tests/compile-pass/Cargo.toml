@@ -1,0 +1,15 @@
+[package]
+name = "compile-pass-fixtures"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+default = ["contract"]
+contract = []
+data-driver = []
+
+[dependencies]
+dusk-forge = { path = "../../../" }

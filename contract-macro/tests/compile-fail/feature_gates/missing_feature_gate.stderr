@@ -1,5 +1,5 @@
 error: Enable either 'contract' or 'data-driver' feature for WASM builds
- --> tests/compile-fail/../common/contract.rs
+ --> tests/compile-fail/feature_gates/../../common/contract.rs
   |
   | #[contract]
   | ^^^^^^^^^^^
@@ -7,7 +7,7 @@ error: Enable either 'contract' or 'data-driver' feature for WASM builds
   = note: this error originates in the attribute macro `contract` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 warning: unexpected `cfg` condition value: `contract`
- --> tests/compile-fail/../common/contract.rs
+ --> tests/compile-fail/feature_gates/../../common/contract.rs
   |
   | #[contract]
   | ^^^^^^^^^^^
@@ -21,7 +21,7 @@ warning: unexpected `cfg` condition value: `contract`
   = note: this warning originates in the attribute macro `contract` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 warning: unexpected `cfg` condition value: `data-driver`
- --> tests/compile-fail/../common/contract.rs
+ --> tests/compile-fail/feature_gates/../../common/contract.rs
   |
   | #[contract]
   | ^^^^^^^^^^^

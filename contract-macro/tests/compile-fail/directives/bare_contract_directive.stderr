@@ -1,5 +1,5 @@
 error: expected attribute arguments in parentheses: `contract(...)`
-  --> tests/compile-fail/bare_contract_directive.rs:17:11
+  --> tests/compile-fail/directives/bare_contract_directive.rs:19:11
    |
-17 |         #[contract]
+19 |         #[contract]
    |           ^^^^^^^^

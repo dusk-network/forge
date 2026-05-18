@@ -1,0 +1,5 @@
+error: public method `iter` cannot use `impl Trait` as return type; extern "C" wrappers require concrete types
+  --> tests/compile-fail/methods/pub_method_impl_trait_return.rs:17:31
+   |
+17 |         pub fn iter(&self) -> impl Iterator<Item = u64> {
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^

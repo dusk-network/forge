@@ -1,3 +1,5 @@
+// Pins: parse::directives::bare_attribute
+//
 // `#[contract]` without a directive list on an inner item is rejected. This
 // pins the strict parse stance: every inner `#[contract(...)]` attribute must
 // be a list, so a future refactor that loosened this check would trip this

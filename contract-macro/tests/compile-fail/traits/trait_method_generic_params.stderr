@@ -1,0 +1,5 @@
+error: trait method `Processor::process` cannot have generic or const parameters; extern "C" wrappers require concrete types
+  --> tests/compile-fail/traits/trait_method_generic_params.rs:21:19
+   |
+21 |         fn process<T>(&self, value: T) {
+   |                   ^^^

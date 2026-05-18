@@ -1,0 +1,5 @@
+error: trait method `Destructible::destroy` cannot consume `self`; use `&self` or `&mut self` instead
+  --> tests/compile-fail/traits/trait_method_consume_self.rs:20:20
+   |
+20 |         fn destroy(self) {}
+   |                    ^^^^

@@ -1,0 +1,5 @@
+error: `MyContract::init` must return `()`; use `panic!` or `assert!` for initialization errors
+  --> tests/compile-fail/methods/init_returns_value.rs:18:32
+   |
+18 |         pub fn init(&mut self) -> bool {
+   |                                ^^^^^^^

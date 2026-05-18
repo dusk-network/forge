@@ -1,0 +1,5 @@
+error: trait method `Runner::run` cannot use `impl Trait` in parameters; extern "C" wrappers require concrete types
+  --> tests/compile-fail/traits/trait_method_impl_trait_param.rs:20:32
+   |
+20 |         fn run(&self, handler: impl core::fmt::Display) {
+   |                                ^^^^^^^^^^^^^^^^^^^^^^^
