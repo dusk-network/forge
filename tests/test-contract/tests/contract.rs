@@ -310,10 +310,10 @@ fn test_renounce_ownership() {
     );
 }
 
-/// `bump_tally` is an inherent method with `#[contract(emits = [...])]`; the
-/// actual `abi::emit` call happens in `emit_tally_bumped`, a free helper
-/// outside any contract impl block, so it is invisible to the macro's body
-/// scanner. Verify the call still succeeds and the delegated event is
+/// `bump_tally` delegates to `emit_tally_bumped`, a free helper outside any
+/// contract impl block where the actual `abi::emit` call happens — invisible
+/// to the macro's emit validator. The event is declared on the module's
+/// `events` list. Verify the call still succeeds and the delegated event is
 /// emitted at runtime.
 #[test]
 fn test_delegating_inherent_method_emits_event() {

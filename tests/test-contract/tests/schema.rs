@@ -128,95 +128,87 @@ fn test_schema_has_functions() {
     );
 }
 
+/// Collect every topic string across all schema events into a flat list.
+fn all_topics(schema: &serde_json::Value) -> Vec<String> {
+    schema["events"]
+        .as_array()
+        .expect("events should be an array")
+        .iter()
+        .flat_map(|e| {
+            e["topics"]
+                .as_array()
+                .expect("event topics should be an array")
+                .iter()
+                .map(|t| t.as_str().unwrap().to_string())
+        })
+        .collect()
+}
+
 #[test]
 fn test_schema_has_events() {
     let schema_json = get_schema_from_wasm();
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let events = schema["events"]
-        .as_array()
-        .expect("events should be an array");
-    let event_topics: Vec<&str> = events
-        .iter()
-        .map(|e| e["topic"].as_str().unwrap())
-        .collect();
+    let topics = all_topics(&schema);
 
-    // Check event topics
+    // Topics now carry the real emitted strings from `ContractEvent::TOPICS`.
     assert!(
-        event_topics.iter().any(|t| t.contains("CounterReset")),
-        "missing CounterReset event"
+        topics.iter().any(|t| t == "counter_reset"),
+        "missing CounterReset event; topics: {topics:?}"
     );
     assert!(
-        event_topics.iter().any(|t| t.contains("CounterUpdated")),
-        "missing CounterUpdated event"
+        topics.iter().any(|t| t == "counter_updated"),
+        "missing CounterUpdated event; topics: {topics:?}"
     );
     assert!(
-        event_topics.iter().any(|t| t.contains("Item")),
-        "missing Item event"
+        topics.iter().any(|t| t == "item_added"),
+        "missing Item event; topics: {topics:?}"
     );
 }
 
-/// Verify that `#[contract(emits = [...])]` on an inherent method registers
-/// events emitted by a helper outside the impl block.
+/// Verify that an event registered on the module attribute appears in the
+/// schema even when its `abi::emit` call lives outside the contract module.
 ///
-/// `bump_tally` is an inherent method that delegates to `emit_tally_bumped`,
-/// a free function where the actual `abi::emit` call lives. The macro's body
-/// scanner cannot see that call, so the author declares the event via
-/// `emits`. The registered event must appear in the schema.
+/// `bump_tally` delegates to `emit_tally_bumped`, a free function where the
+/// actual `abi::emit` call lives. The validator never sees that call, but the
+/// event is declared in the module's `events = [...]` list, so it reaches the
+/// schema.
 #[test]
 fn test_schema_has_delegated_inherent_event() {
     let schema_json = get_schema_from_wasm();
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let events = schema["events"]
-        .as_array()
-        .expect("events should be an array");
-    let event_topics: Vec<&str> = events
-        .iter()
-        .map(|e| e["topic"].as_str().unwrap())
-        .collect();
-
+    let topics = all_topics(&schema);
     assert!(
-        event_topics.iter().any(|t| t.contains("TallyBumped")),
-        "missing TallyBumped event from inherent emits attribute; \
-         topics: {event_topics:?}"
+        topics.iter().any(|t| t == "tally_bumped"),
+        "missing TallyBumped event registered on the module attribute; \
+         topics: {topics:?}"
     );
 }
 
-/// Verify that manually registered events via `#[contract(emits = [...])]`
-/// appear in the schema.
+/// Verify that an event emitted only by a trait's default implementation
+/// appears in the schema.
 ///
-/// The `Ownable` trait impl uses the `emits` attribute on methods to register
-/// ownership events that are emitted by the trait's default implementations
-/// (which the macro can't see since they have empty bodies in our impl block).
+/// The `Ownable` trait's default methods emit `OwnershipTransferred` under two
+/// topics; the impl block exposes them with empty bodies, so the emit calls
+/// live in the trait, not the contract module. Declaring the type once on the
+/// `events` list registers both topics via its `ContractEvent::TOPICS`.
 #[test]
 fn test_schema_has_ownership_events() {
     let schema_json = get_schema_from_wasm();
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let events = schema["events"]
-        .as_array()
-        .expect("events should be an array");
-    let event_topics: Vec<&str> = events
-        .iter()
-        .map(|e| e["topic"].as_str().unwrap())
-        .collect();
-
-    // Check for ownership events registered via emits attribute.
-    // Topics are stored as const path strings
-    // (e.g., "events::OwnershipTransferred::TRANSFERRED").
+    let topics = all_topics(&schema);
     assert!(
-        event_topics.iter().any(|t| t.contains("TRANSFERRED")),
-        "missing ownership transferred event from emits attribute; \
-         topics: {event_topics:?}"
+        topics.iter().any(|t| t == "ownership_transferred"),
+        "missing ownership transferred topic; topics: {topics:?}"
     );
     assert!(
-        event_topics.iter().any(|t| t.contains("RENOUNCED")),
-        "missing ownership renounced event from emits attribute; \
-         topics: {event_topics:?}"
+        topics.iter().any(|t| t == "ownership_renounced"),
+        "missing ownership renounced topic; topics: {topics:?}"
     );
 }
 
@@ -648,6 +640,45 @@ fn test_decode_event_item_added() {
     assert_eq!(decoded["active"], true);
 }
 
+#[test]
+fn test_decode_event_item_removed() {
+    // `Item` is a multi-topic event (`item_added`, `item_removed`). This
+    // exercises the SECOND topic so the `ContractEvent::TOPICS.contains(..)`
+    // dispatch in `decode_event` is proven to match beyond the first entry.
+    let mut session = setup_contract_session();
+
+    let item = Item {
+        id: ItemId(7),
+        value: 4242,
+        active: false,
+    };
+
+    session
+        .call_public::<_, ()>(&OWNER_SK, CONTRACT_ID, "add_item", &item)
+        .expect("add_item should succeed");
+
+    let receipt = session
+        .call_public::<_, ()>(&OWNER_SK, CONTRACT_ID, "remove_item", &item.id)
+        .expect("remove_item should succeed");
+
+    // Find the item_removed event — the multi-topic struct's second topic.
+    let event = receipt
+        .events
+        .iter()
+        .find(|e| e.topic == "item_removed")
+        .expect("remove_item should emit item_removed event");
+
+    // Decode it through the same `Item` block that serves `item_added`.
+    let mut driver = DataDriverWasm::new();
+    let decoded = driver
+        .decode_event(&event.topic, &event.data)
+        .expect("Failed to decode Item event under item_removed");
+
+    assert!(decoded.is_object(), "Item event should be an object");
+    assert_eq!(decoded["value"], 4242);
+    assert_eq!(decoded["active"], false);
+}
+
 // =============================================================================
 // Negative tests for error handling
 // =============================================================================
@@ -870,38 +901,49 @@ fn test_schema_event_details() {
         .as_array()
         .expect("events should be an array");
 
-    // Find CounterUpdated event and verify data type
+    // Find CounterUpdated event by its data type and verify its topic.
     let counter_updated = events
         .iter()
         .find(|e| {
-            e["topic"]
+            e["data"]
                 .as_str()
-                .map(|t| t.contains("CounterUpdated"))
+                .map(|d| d.contains("CounterUpdated"))
                 .unwrap_or(false)
         })
         .expect("CounterUpdated event should exist");
 
-    let data_type = counter_updated["data"].as_str().unwrap();
-    assert!(
-        data_type.contains("CounterUpdated"),
-        "CounterUpdated data type should contain CounterUpdated: {data_type}"
+    let topics: Vec<&str> = counter_updated["topics"]
+        .as_array()
+        .expect("topics should be an array")
+        .iter()
+        .map(|t| t.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        topics,
+        vec!["counter_updated"],
+        "CounterUpdated should carry its single topic"
     );
 
-    // Find Item event (item_added or item_removed)
+    // Find the Item event by data type; it carries two topics.
     let item_event = events
         .iter()
         .find(|e| {
-            e["topic"]
+            e["data"]
                 .as_str()
-                .map(|t| t.contains("Item"))
+                .map(|d| d.contains("Item"))
                 .unwrap_or(false)
         })
         .expect("Item event should exist");
 
-    let data_type = item_event["data"].as_str().unwrap();
+    let topics: Vec<&str> = item_event["topics"]
+        .as_array()
+        .expect("topics should be an array")
+        .iter()
+        .map(|t| t.as_str().unwrap())
+        .collect();
     assert!(
-        data_type.contains("Item"),
-        "Item event data type should contain Item: {data_type}"
+        topics.contains(&"item_added") && topics.contains(&"item_removed"),
+        "Item should carry both topics: {topics:?}"
     );
 }
 
@@ -1191,19 +1233,28 @@ fn test_schema_event_fields_consistent() {
             .unwrap_or_else(|| panic!("Event at index {i} should be an object"));
 
         assert!(
-            event_obj.contains_key("topic"),
-            "Event at index {i} missing 'topic' field"
+            event_obj.contains_key("topics"),
+            "Event at index {i} missing 'topics' field"
         );
         assert!(
             event_obj.contains_key("data"),
             "Event at index {i} missing 'data' field"
         );
 
-        let topic = &event["topic"];
+        let topics = &event["topics"];
+        let topics_arr = topics.as_array().unwrap_or_else(|| {
+            panic!("Event at index {i}: 'topics' must be an array, got {topics:?}")
+        });
         assert!(
-            topic.is_string(),
-            "Event at index {i}: 'topic' must be string, got {topic:?}"
+            !topics_arr.is_empty(),
+            "Event at index {i}: 'topics' must be non-empty"
         );
+        for topic in topics_arr {
+            assert!(
+                topic.is_string(),
+                "Event at index {i}: each topic must be a string, got {topic:?}"
+            );
+        }
     }
 }
 
@@ -1268,18 +1319,12 @@ fn test_schema_no_duplicate_event_topics() {
     let schema: serde_json::Value =
         serde_json::from_str(&schema_json).expect("Failed to parse schema JSON");
 
-    let events = schema["events"]
-        .as_array()
-        .expect("events should be an array");
-    let topics: Vec<&str> = events
-        .iter()
-        .map(|e| e["topic"].as_str().unwrap())
-        .collect();
+    let topics = all_topics(&schema);
 
     let mut seen = std::collections::HashSet::new();
     for topic in &topics {
         assert!(
-            seen.insert(*topic),
+            seen.insert(topic.clone()),
             "Duplicate event topic in schema: {topic}"
         );
     }

@@ -20,7 +20,14 @@
 #![deny(clippy::pedantic)]
 
 /// Test contract demonstrating all macro features.
-#[dusk_forge::contract]
+#[dusk_forge::contract(events = [
+    events::CounterReset,
+    events::CounterUpdated,
+    events::ContractUpdated,
+    Item,
+    events::OwnershipTransferred,
+    events::TallyBumped,
+])]
 mod test_contract {
     extern crate alloc;
 
@@ -76,7 +83,6 @@ mod test_contract {
         ///
         /// This method intentionally doesn't emit an event as it's only called
         /// during contract deployment.
-        #[contract(no_event)]
         pub fn init(&mut self, owner: PublicKey) {
             self.owner = Some(owner);
         }
@@ -97,16 +103,17 @@ mod test_contract {
 
         /// Sets the counter to a new value.
         ///
-        /// Exercises: single parameter setter + event emission.
+        /// Exercises: single parameter setter + event emission. The event is
+        /// built in a local before emitting, so the validator cannot resolve
+        /// the data argument to a type and skips it — the registered list
+        /// still carries `CounterUpdated`.
         pub fn set_counter(&mut self, value: u64) {
             let previous = core::mem::replace(&mut self.counter, value);
-            abi::emit(
-                events::CounterUpdated::TOPIC,
-                events::CounterUpdated {
-                    previous,
-                    new: value,
-                },
-            );
+            let event = events::CounterUpdated {
+                previous,
+                new: value,
+            };
+            abi::emit(events::CounterUpdated::TOPIC, event);
         }
 
         /// Updates both counter and label.
@@ -145,11 +152,10 @@ mod test_contract {
 
         /// Bumps the tally by delegating to a free helper function.
         ///
-        /// Exercises `#[contract(emits = [...])]` on an inherent method: the
-        /// actual `abi::emit` call lives in `helpers::emit_tally_bumped`,
-        /// outside any contract impl block, so the macro's body scanner
-        /// cannot see it.
-        #[contract(emits = [(events::TallyBumped::TOPIC, events::TallyBumped)])]
+        /// Exercises a registered event whose `abi::emit` call lives in
+        /// `helpers::emit_tally_bumped`, outside any contract impl block: the
+        /// validator never sees the emit, yet the event is declared on the
+        /// module attribute, so it still reaches the schema.
         pub fn bump_tally(&mut self) {
             self.counter += 1;
             helpers::emit_tally_bumped();
@@ -231,9 +237,9 @@ mod test_contract {
     /// contract functions; `owner_mut` and `only_owner` remain internal.
     ///
     /// Empty method bodies signal the macro to use the trait's default
-    /// implementations. The `emits` attribute on methods registers events
-    /// that are emitted by trait default implementations (not visible in
-    /// the impl block body).
+    /// implementations. The events those defaults emit
+    /// (`OwnershipTransferred`) are declared on the module's `events` list,
+    /// since the emit calls live in the trait body, not the impl block.
     #[contract(expose = [owner, transfer_ownership, renounce_ownership])]
     #[allow(clippy::unused_self, clippy::needless_pass_by_value)]
     impl Ownable for TestContract {
@@ -250,13 +256,11 @@ mod test_contract {
         /// Transfers ownership to a new public key.
         /// Empty body signals the macro to use the trait's default
         /// implementation.
-        #[contract(emits = [(events::OwnershipTransferred::TRANSFERRED, events::OwnershipTransferred)])]
         fn transfer_ownership(&mut self, new_owner: PublicKey) {}
 
         /// Renounces ownership of the contract.
         /// Empty body signals the macro to use the trait's default
         /// implementation.
-        #[contract(emits = [(events::OwnershipTransferred::RENOUNCED, events::OwnershipTransferred)])]
         fn renounce_ownership(&mut self) {}
     }
 
