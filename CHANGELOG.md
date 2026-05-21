@@ -10,16 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add compile-fail and compile-pass test harness for the contract macro.
-- Add `#[contract(emits = [...])]` method-level attribute for manual event registration, covering both trait impls with default implementations and inherent methods that delegate to helpers in other crates.
-- Add compile error when a public `&mut self` method emits no events. Suppress with `#[contract(no_event)]`.
-- Add detection of variable identifiers used as `abi::emit()` topics (warning pending `proc_macro_diagnostic` stabilisation).
+- Add the `ContractEvent` trait and the `#[contract(events = [Type, ...])]` module attribute to declare a contract's events once at module scope. A type may carry multiple topics via `TOPICS`.
+- Add compile-time validation that in-module `abi::emit()` calls reference a registered event type.
 - Add the `dusk-forge` CLI with `new`, `build`, `test`, and `check` commands for contract project scaffolding and workflows.
 - Add `expand`, `clean`, and `completions` commands to the `dusk-forge` CLI.
 - Add `schema`, `call`, and `verify` commands to the `dusk-forge` CLI.
 
 ### Changed
 
-- Replace the four hand-rolled `#[contract(...)]` directive parsers with a single typed pass returning a `ContractDirectives` struct. Malformed inputs (typo'd keyword, wrong shape, unparseable feeds type, `expose = (...)` with parens, extra tokens after a `(topic, EventType)` tuple) now produce a `compile_error!` instead of being silently dropped. Duplicate directives (within one attribute or across multiple `#[contract(...)]` attributes on the same item) also error [#24].
+- Rename `schema::Event.topic` to `topics` (a slice), populated from `ContractEvent::TOPICS`; `Contract::get_event` matches against the slice.
+- Replace the hand-rolled `#[contract(...)]` directive parsers with a single typed pass returning a `ContractDirectives` struct. Malformed inputs (typo'd keyword, wrong shape, unparseable feeds type, `expose = (...)` with parens) now produce a `compile_error!` instead of being silently dropped. Duplicate directives (within one attribute or across multiple `#[contract(...)]` attributes on the same item) also error [#24].
 - Restructure the contract-macro parse phase (internal — no public API or generated-code changes) [#27].
 - Move workspace to Rust edition 2024 on the stable toolchain (MSRV 1.85). Generated contract wrappers now use `#[unsafe(no_mangle)]`.
 - Remove `-Z build-std=core,alloc` from contract builds (no longer needed on stable).
@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Remove the per-method `#[contract(emits = [...])]` / `#[contract(no_event)]` directives and the lint requiring every `pub &mut self` method to emit; events are now declared via `#[contract(events = [...])]`.
 - Drop the custom data-driver handler escape hatch (`#[contract(custom)]` and the `encode_input` / `decode_input` / `decode_output` attributes). The feature had no production consumers and was the source of recurring macro bugs caused by user code being moved out of its original module and losing its resolution context. Default `rkyv` / JSON codegen is now the only path.
 
 ## [0.2.2] - 2026-02-02
