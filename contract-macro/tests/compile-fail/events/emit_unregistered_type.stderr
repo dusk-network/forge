@@ -1,0 +1,5 @@
+error: event type `Unregistered` is emitted but not registered; add it to the `#[contract(events = [...])]` list
+  --> tests/compile-fail/events/emit_unregistered_type.rs:21:32
+   |
+21 |             abi::emit("topic", Unregistered {});
+   |                                ^^^^^^^^^^^^^^^

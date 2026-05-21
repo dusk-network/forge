@@ -154,27 +154,6 @@ fn format_generic_args(args: &syn::PathArguments, import_map: &HashMap<String, S
     }
 }
 
-/// Resolve a path string (like `events::PauseToggled::PAUSED`) using the import
-/// map.
-///
-/// The first segment is looked up in the import map and resolved if found.
-fn resolve_path_string(path: &str, import_map: &HashMap<String, String>) -> String {
-    if path.is_empty() {
-        return String::new();
-    }
-
-    let segments: Vec<&str> = path.split("::").collect();
-    if let Some(resolved_base) = import_map.get(segments[0]) {
-        if segments.len() == 1 {
-            resolved_base.clone()
-        } else {
-            format!("{}::{}", resolved_base, segments[1..].join("::"))
-        }
-    } else {
-        path.to_string()
-    }
-}
-
 /// Build a type map containing all types used in functions and events,
 /// resolved to their fully qualified paths.
 pub(crate) fn build_type_map(
@@ -203,18 +182,41 @@ pub(crate) fn build_type_map(
         }
     }
 
-    // Resolve event data types and topic paths
+    // Resolve event data types
     for event in events {
         let data_key = event.data_type.to_string();
         let data_resolved = resolve_type(&event.data_type, &import_map);
         type_map.insert(data_key, data_resolved);
-
-        // Also resolve the topic path (e.g., "events::PauseToggled::PAUSED")
-        let topic_resolved = resolve_path_string(&event.topic, &import_map);
-        type_map.insert(event.topic.clone(), topic_resolved);
     }
 
     type_map
+}
+
+/// Resolve a type's tokens to their fully-qualified string form using the
+/// module's imports.
+///
+/// Used by the emit validator so that the registered list and the emit site
+/// are compared after the same import rewriting — `events::Foo` and the
+/// imported short form `Foo` normalize to the same string when a shared
+/// `use` covers them.
+pub(crate) fn resolve_type_str(ty: &TokenStream2, imports: &[ImportInfo]) -> String {
+    let import_map = build_import_map(imports);
+    resolve_type(ty, &import_map)
+}
+
+/// Get the resolved type tokens for `ty` from the `type_map`, falling back to
+/// `ty` unchanged when no resolution is recorded.
+///
+/// The resolved string is re-parsed as a [`syn::Type`] (not a `Path`, since
+/// tuples are not paths) so the caller receives usable tokens.
+pub(crate) fn resolved_tokens(ty: &TokenStream2, type_map: &TypeMap) -> TokenStream2 {
+    let key = ty.to_string();
+    if let Some(resolved) = type_map.get(&key)
+        && let Ok(resolved_type) = syn::parse_str::<syn::Type>(resolved)
+    {
+        return quote::quote! { #resolved_type };
+    }
+    ty.clone()
 }
 
 #[cfg(test)]
@@ -304,59 +306,43 @@ mod tests {
     }
 
     // =========================================================================
-    // resolve_path_string edge cases
-    //
-    // The function splits on `::`, looks up the first segment in the import
-    // map, and reassembles the path. These tests exercise the boundary cases
-    // (empty input, generics in a single segment) plus the resolvable /
-    // unresolvable multi-segment forms that previously had only indirect
-    // coverage via `resolve_type`.
+    // resolved_tokens
     // =========================================================================
 
-    #[test]
-    fn test_resolve_path_string_empty_input() {
-        // Empty input is returned unchanged.
-        let import_map = HashMap::new();
-        assert_eq!(resolve_path_string("", &import_map), "");
+    fn normalize_tokens(tokens: &TokenStream2) -> String {
+        tokens
+            .to_string()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     #[test]
-    fn test_resolve_path_string_multi_level_first_segment_rewritten() {
-        // Only the first segment is rewritten; remaining segments pass
-        // through verbatim, joined with `::` exactly as supplied.
-        let imports = vec![make_import("events", "my_crate::events")];
-        let import_map = build_import_map(&imports);
+    fn test_resolved_tokens_found_in_map() {
+        let mut type_map = TypeMap::new();
+        type_map.insert("Address".to_string(), "my_crate::Address".to_string());
 
-        let resolved = resolve_path_string("events::PauseToggled::PAUSED", &import_map);
-        assert_eq!(resolved, "my_crate::events::PauseToggled::PAUSED");
+        let resolved = resolved_tokens(&quote! { Address }, &type_map);
+        assert_eq!(normalize_tokens(&resolved), "my_crate :: Address");
     }
 
     #[test]
-    fn test_resolve_path_string_multi_level_unresolvable_passes_through() {
-        // First segment is missing from the import map: the entire path is
-        // returned as-is (no partial rewrite, no error).
-        let imports = vec![make_import("known", "my_crate::known")];
-        let import_map = build_import_map(&imports);
-
-        let resolved = resolve_path_string("unknown::Type::FIELD", &import_map);
-        assert_eq!(resolved, "unknown::Type::FIELD");
+    fn test_resolved_tokens_not_in_map_returns_input() {
+        let type_map = TypeMap::new();
+        let resolved = resolved_tokens(&quote! { u64 }, &type_map);
+        assert_eq!(normalize_tokens(&resolved), "u64");
     }
 
     #[test]
-    fn test_resolve_path_string_single_segment_with_generics_passes_through() {
-        // `split("::")` does not descend into generic argument lists, so the
-        // entire `Option<MyType>` is treated as the first segment. Since no
-        // import named `Option<MyType>` exists, the path is returned as-is.
-        // This documents the implicit code path: callers cannot rely on this
-        // helper to rewrite type parameters.
-        let imports = vec![make_import("MyType", "my_crate::MyType")];
-        let import_map = build_import_map(&imports);
-
-        let resolved = resolve_path_string("Option<MyType>", &import_map);
-        assert_eq!(
-            resolved, "Option<MyType>",
-            "type parameters in a single-segment path are not descended into"
+    fn test_resolved_tokens_tuple() {
+        let mut type_map = TypeMap::new();
+        type_map.insert(
+            "(Address , u64)".to_string(),
+            "(my_crate::Address, u64)".to_string(),
         );
+
+        let resolved = resolved_tokens(&quote! { (Address, u64) }, &type_map);
+        assert!(normalize_tokens(&resolved).contains("my_crate :: Address"));
     }
 
     // =========================================================================

@@ -30,11 +30,12 @@ pub(crate) fn contract_module(
         events,
     } = analysis;
 
-    let schema = schema(contract_name, imports, functions, events);
+    let type_map = resolve::build_type_map(imports, functions, events);
+
+    let schema = schema(contract_name, imports, functions, events, &type_map);
     let state_static = state_static(contract_ident);
     let externs = extern_wrappers(functions, contract_ident);
 
-    let type_map = resolve::build_type_map(imports, functions, events);
     let data_driver = data_driver::module(&type_map, functions, events);
 
     let stripped_items = stripped_module_items(items, contract_name);
@@ -106,6 +107,7 @@ pub(crate) fn schema(
     imports: &[ImportInfo],
     functions: &[FunctionInfo],
     events: &[EventInfo],
+    type_map: &resolve::TypeMap,
 ) -> TokenStream2 {
     let contract_name_lit = contract_name;
 
@@ -150,15 +152,15 @@ pub(crate) fn schema(
     let event_entries: Vec<_> = events
         .iter()
         .map(|e| {
-            let topic = &e.topic;
-            let data = &e.data_type;
-
-            // Convert type tokens to string for the schema
-            let data_str = data.to_string();
+            // The schema records the event type as written; topics are read
+            // from its `ContractEvent` impl via the fully-resolved path so the
+            // const is nameable at the schema's (module-parent) scope.
+            let data_str = e.data_type.to_string();
+            let resolved = resolve::resolved_tokens(&e.data_type, type_map);
 
             quote! {
                 dusk_forge::schema::Event {
-                    topic: #topic,
+                    topics: <#resolved as dusk_forge::ContractEvent>::TOPICS,
                     data: #data_str,
                 }
             }

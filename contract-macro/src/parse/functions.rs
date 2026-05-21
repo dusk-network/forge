@@ -14,7 +14,7 @@ use syn::{
     Visibility,
 };
 
-use super::model::{EventInfo, FunctionInfo, ParameterInfo, Receiver, TraitImplInfo};
+use super::model::{FunctionInfo, ParameterInfo, Receiver, TraitImplInfo};
 use crate::parse::{directives, events};
 use crate::validate;
 
@@ -117,18 +117,13 @@ fn validate_feeds(
     Ok(())
 }
 
-/// Extract methods and method-level events from a trait impl block.
+/// Extract methods from a trait impl block.
 ///
 /// Only methods whose names appear in the `expose_list` are extracted.
 /// Methods with empty bodies `{}` are treated as "use default implementation" -
-/// the macro will generate wrappers that call the trait method directly. The
-/// returned event vector is the union of `#[contract(emits = [...])]`
-/// registrations across the exposed methods.
-pub(super) fn trait_methods(
-    trait_impl: &TraitImplInfo,
-) -> Result<(Vec<FunctionInfo>, Vec<EventInfo>), syn::Error> {
+/// the macro will generate wrappers that call the trait method directly.
+pub(super) fn trait_methods(trait_impl: &TraitImplInfo) -> Result<Vec<FunctionInfo>, syn::Error> {
     let mut functions = Vec::new();
-    let mut method_events = Vec::new();
 
     for item in &trait_impl.impl_block.items {
         if let ImplItem::Fn(method) = item {
@@ -149,28 +144,13 @@ pub(super) fn trait_methods(
             let doc = extract_doc_comment(&method.attrs);
             let method_directives = directives::parse_contract_directives(&method.attrs)?;
             let feed_type = method_directives.feeds.clone();
-            let suppressed = method_directives.no_event;
-            let emits = method_directives.emits.unwrap_or_default();
-            let has_method_emits = !emits.is_empty();
             let receiver = extract_receiver(method);
-
-            // For trait methods:
-            // - Default impl (empty body): check if emits attribute registered on method
-            // - Non-default impl: check body for emit calls
-            let has_emit_call = if is_default_impl {
-                has_method_emits
-            } else {
-                events::method_has_emit_call(method)
-            };
 
             // Validate feed-related attributes
             // (only check non-empty bodies since empty bodies delegate to trait defaults)
             if !is_default_impl {
                 validate_feeds(method, &name, feed_type.as_ref())?;
             }
-
-            // Validate that mutating methods emit events
-            validate::method_emits_event(method, has_emit_call, suppressed, has_method_emits)?;
 
             // Extract parameters (name and type)
             let params = parameters(method);
@@ -199,7 +179,6 @@ pub(super) fn trait_methods(
                 trait_name,
                 feed_type,
             });
-            method_events.extend(emits);
         }
     }
 
@@ -217,23 +196,18 @@ pub(super) fn trait_methods(
         }
     }
 
-    Ok((functions, method_events))
+    Ok(functions)
 }
 
-/// Extract public methods and method-level events from an impl block.
+/// Extract public methods from an impl block.
 ///
 /// Note: The `new` method is skipped because it's a special constructor
 /// used only for initializing the static STATE variable.
 ///
 /// Returns an error if a method uses `abi::feed()` but lacks the
-/// `#[contract(feeds = "Type")]` attribute. The returned event vector is the
-/// union of `#[contract(emits = [...])]` registrations across the public
-/// methods.
-pub(super) fn public_methods(
-    impl_block: &ItemImpl,
-) -> Result<(Vec<FunctionInfo>, Vec<EventInfo>), syn::Error> {
+/// `#[contract(feeds = "Type")]` attribute.
+pub(super) fn public_methods(impl_block: &ItemImpl) -> Result<Vec<FunctionInfo>, syn::Error> {
     let mut functions = Vec::new();
-    let mut method_events = Vec::new();
 
     for item in &impl_block.items {
         if let ImplItem::Fn(method) = item {
@@ -251,17 +225,10 @@ pub(super) fn public_methods(
             let doc = extract_doc_comment(&method.attrs);
             let method_directives = directives::parse_contract_directives(&method.attrs)?;
             let feed_type = method_directives.feeds.clone();
-            let suppressed = method_directives.no_event;
-            let emits = method_directives.emits.unwrap_or_default();
-            let has_method_emits = !emits.is_empty();
             let receiver = extract_receiver(method);
-            let has_emit_call = events::method_has_emit_call(method);
 
             // Validate feed-related attributes
             validate_feeds(method, &name, feed_type.as_ref())?;
-
-            // Validate that mutating methods emit events
-            validate::method_emits_event(method, has_emit_call, suppressed, has_method_emits)?;
 
             // Extract parameters (name and type)
             let params = parameters(method);
@@ -283,11 +250,10 @@ pub(super) fn public_methods(
                 trait_name: None, // Not a trait method
                 feed_type,
             });
-            method_events.extend(emits);
         }
     }
 
-    Ok((functions, method_events))
+    Ok(functions)
 }
 
 /// Extract parameter names and types from a method (excluding self).
@@ -455,10 +421,9 @@ mod tests {
             impl_block: &impl_block,
             expose_list: vec!["owner".to_string()],
         };
-        let (functions, events) = trait_methods(&trait_impl).unwrap();
+        let functions = trait_methods(&trait_impl).unwrap();
         assert_eq!(functions.len(), 1);
         assert_eq!(functions[0].name.to_string(), "owner");
-        assert!(events.is_empty());
     }
 
     #[test]
@@ -468,8 +433,7 @@ mod tests {
             impl OwnableTrait for MyContract {
                 fn owner(&self) -> Option<Address> { self.owner }
                 fn owner_mut(&mut self) -> &mut Option<Address> { &mut self.owner }
-                // Method-level emits attribute for trait default impl
-                #[contract(emits = [(OwnershipTransferred::TOPIC, OwnershipTransferred)])]
+                // Empty-body stub: signals "use the trait default implementation".
                 fn transfer_ownership(&mut self, new_owner: Address) {}
             }
         };
@@ -478,45 +442,28 @@ mod tests {
             impl_block: &impl_block,
             expose_list: vec!["owner".to_string(), "transfer_ownership".to_string()],
         };
-        let (functions, _events) = trait_methods(&trait_impl).unwrap();
+        let functions = trait_methods(&trait_impl).unwrap();
         assert_eq!(functions.len(), 2);
     }
 
     #[test]
-    fn test_public_methods_delegating_with_emits() {
-        // Inherent method with an emit-free body but an `emits` attribute
-        // (delegates to a helper) — the new strict check must accept it.
+    fn test_public_methods_delegating_to_helper_compiles() {
+        // An inherent `&mut self` method whose body only delegates to a helper
+        // (no in-body `abi::emit`) is accepted — event registration now lives
+        // on the module attribute, not per method.
         let impl_block: ItemImpl = syn::parse_quote! {
             impl MyContract {
-                #[contract(emits = [(Resolved::TOPIC, Resolved)])]
                 pub fn resolve(&mut self) {
                     self.core.resolve();
                 }
             }
         };
-        let (functions, _events) = match public_methods(&impl_block) {
+        let functions = match public_methods(&impl_block) {
             Ok(result) => result,
             Err(err) => panic!("expected success, got: {err}"),
         };
         assert_eq!(functions.len(), 1);
         assert_eq!(functions[0].name.to_string(), "resolve");
-    }
-
-    #[test]
-    fn test_public_methods_delegating_without_emits_errors() {
-        // Same shape without the `emits` attribute must still fail the strict
-        // mutating-method check.
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn resolve(&mut self) {
-                    self.core.resolve();
-                }
-            }
-        };
-        let Err(err) = public_methods(&impl_block) else {
-            panic!("expected error for delegating method without emits");
-        };
-        assert!(err.to_string().contains("emits no events"));
     }
 
     #[test]
@@ -541,52 +488,22 @@ mod tests {
     }
 
     #[test]
-    fn test_trait_methods_collects_method_events() {
-        // Methods in `expose_list` contribute their `#[contract(emits = ...)]`
-        // entries to the returned events vector; methods outside the list are
-        // skipped even if they carry emits.
-        let impl_block: ItemImpl = syn::parse_quote! {
-            #[contract(expose = [transfer_ownership])]
-            impl OwnableTrait for MyContract {
-                #[contract(emits = [(Transferred::TOPIC, Transferred)])]
-                fn transfer_ownership(&mut self) {}
-
-                // Not in expose list — should be ignored even with emits.
-                #[contract(emits = [(Hidden::TOPIC, Hidden)])]
-                fn unexposed(&mut self) {}
-            }
-        };
-        let trait_impl = TraitImplInfo {
-            trait_name: "OwnableTrait".to_string(),
-            impl_block: &impl_block,
-            expose_list: vec!["transfer_ownership".to_string()],
-        };
-        let (_functions, events) = trait_methods(&trait_impl).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].topic, "Transferred::TOPIC");
-    }
-
-    #[test]
-    fn test_public_methods_collects_method_events() {
-        // Public non-`new` methods contribute their `#[contract(emits = ...)]`
-        // entries; private methods and `new` are skipped even with emits.
+    fn test_public_methods_skips_private_and_new() {
+        // Only public, non-`new` methods are surfaced.
         let impl_block: ItemImpl = syn::parse_quote! {
             impl MyContract {
-                #[contract(emits = [(Resolved::TOPIC, Resolved)])]
                 pub fn resolve(&mut self) { self.core.resolve(); }
 
                 // Private method — should be ignored.
-                #[contract(emits = [(Hidden::TOPIC, Hidden)])]
                 fn private_helper(&mut self) { self.core.hidden(); }
 
-                // Constructor — should be ignored even if it carries emits.
-                #[contract(emits = [(New::TOPIC, New)])]
+                // Constructor — should be ignored.
                 pub fn new() -> Self { Self }
             }
         };
-        let (_functions, events) = public_methods(&impl_block).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].topic, "Resolved::TOPIC");
+        let functions = public_methods(&impl_block).unwrap();
+        assert_eq!(functions.len(), 1);
+        assert_eq!(functions[0].name.to_string(), "resolve");
     }
 
     // ========================================================================

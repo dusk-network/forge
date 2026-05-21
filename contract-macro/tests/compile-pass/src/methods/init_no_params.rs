@@ -15,7 +15,6 @@ pub mod my_contract {
             Self { initialized: false }
         }
 
-        #[contract(no_event)]
         pub fn init(&mut self) {
             self.initialized = true;
         }

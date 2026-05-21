@@ -72,13 +72,12 @@ pub(crate) struct FunctionInfo {
     pub feed_type: Option<TokenStream2>,
 }
 
-/// Information about an event extracted from `abi::emit()` calls or
-/// `#[contract(emits = [...])]` attributes.
+/// A contract event registered via the `#[contract(events = [...])]` module
+/// attribute.
 #[derive(Clone)]
 pub(crate) struct EventInfo {
-    /// The event topic string.
-    pub topic: String,
-    /// The event data type.
+    /// The registered event data type path, exactly as written in the
+    /// `events = [...]` list.
     pub data_type: TokenStream2,
 }
 
@@ -95,7 +94,7 @@ pub(crate) struct TraitImplInfo<'a> {
     pub expose_list: Vec<String>,
 }
 
-/// The fully-extracted, deduplicated result of analyzing a contract module.
+/// The fully-extracted result of analyzing a contract module.
 ///
 /// Returned by [`super::analyze`] and consumed by the `generate` phase.
 pub(crate) struct Analysis {
@@ -109,6 +108,6 @@ pub(crate) struct Analysis {
     /// All public methods exposed by the contract — both inherent and
     /// trait-default — flattened into one list.
     pub functions: Vec<FunctionInfo>,
-    /// All events the contract emits, deduplicated by topic (first-seen wins).
+    /// Events registered via the `#[contract(events = [...])]` attribute.
     pub events: Vec<EventInfo>,
 }
