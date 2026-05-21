@@ -125,6 +125,7 @@ pub mod helpers {
 /// Events emitted by the test contract.
 pub mod events {
     use dusk_core::signatures::bls::PublicKey;
+    use dusk_forge::ContractEvent;
     #[allow(unused_imports)]
     use rkyv::bytecheck::CheckBytes;
     use rkyv::{Archive, Deserialize, Serialize};
@@ -138,6 +139,10 @@ pub mod events {
     impl CounterReset {
         /// Event topic for resetting the counter.
         pub const TOPIC: &'static str = "counter_reset";
+    }
+
+    impl ContractEvent for CounterReset {
+        const TOPICS: &'static [&'static str] = &[Self::TOPIC];
     }
 
     /// Event emitted when the counter value changes.
@@ -154,6 +159,10 @@ pub mod events {
     impl CounterUpdated {
         /// Event topic for counter updates.
         pub const TOPIC: &'static str = "counter_updated";
+    }
+
+    impl ContractEvent for CounterUpdated {
+        const TOPICS: &'static [&'static str] = &[Self::TOPIC];
     }
 
     /// Event emitted when ownership is transferred or renounced.
@@ -174,6 +183,10 @@ pub mod events {
         pub const RENOUNCED: &'static str = "ownership_renounced";
     }
 
+    impl ContractEvent for OwnershipTransferred {
+        const TOPICS: &'static [&'static str] = &[Self::TRANSFERRED, Self::RENOUNCED];
+    }
+
     // Re-use Item as an event type for item operations.
     pub use super::Item;
 
@@ -182,6 +195,10 @@ pub mod events {
         pub const ADDED: &'static str = "item_added";
         /// Event topic for removing an item.
         pub const REMOVED: &'static str = "item_removed";
+    }
+
+    impl ContractEvent for Item {
+        const TOPICS: &'static [&'static str] = &[Self::ADDED, Self::REMOVED];
     }
 
     /// Event emitted by [`super::helpers::emit_tally_bumped`].
@@ -193,6 +210,10 @@ pub mod events {
     impl TallyBumped {
         /// Event topic for tally bumps.
         pub const TOPIC: &'static str = "tally_bumped";
+    }
+
+    impl ContractEvent for TallyBumped {
+        const TOPICS: &'static [&'static str] = &[Self::TOPIC];
     }
 
     /// Event emitted when the contract is updated with new counter and label.
@@ -209,6 +230,10 @@ pub mod events {
     impl ContractUpdated {
         /// Event topic for contract updates.
         pub const TOPIC: &'static str = "contract_updated";
+    }
+
+    impl ContractEvent for ContractUpdated {
+        const TOPICS: &'static [&'static str] = &[Self::TOPIC];
     }
 }
 

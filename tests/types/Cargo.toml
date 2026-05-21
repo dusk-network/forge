@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 bytecheck = { workspace = true }
 dusk-core = { workspace = true }
+dusk-forge = { path = "../.." }
 rkyv = { workspace = true }
 serde = { workspace = true, optional = true }
 
