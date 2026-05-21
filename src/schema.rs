@@ -29,8 +29,8 @@ pub struct Function {
 /// Schema for a contract event.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct Event {
-    /// Event topic string.
-    pub topic: &'static str,
+    /// Topics under which the event is emitted.
+    pub topics: &'static [&'static str],
     /// Event data type name.
     pub data: &'static str,
 }
@@ -88,7 +88,7 @@ impl Contract {
     /// Find an event by topic.
     #[must_use]
     pub fn get_event(&self, topic: &str) -> Option<&Event> {
-        self.events.iter().find(|e| e.topic == topic)
+        self.events.iter().find(|e| e.topics.contains(&topic))
     }
 
     /// Serialize the schema to a JSON string.
