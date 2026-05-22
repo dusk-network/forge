@@ -343,7 +343,7 @@ mod tests {
     use super::*;
     use crate::parse::{ParameterInfo, Receiver};
 
-    fn normalize_tokens(tokens: TokenStream2) -> String {
+    fn normalize_tokens(tokens: &TokenStream2) -> String {
         tokens
             .to_string()
             .split_whitespace()
@@ -366,9 +366,9 @@ mod tests {
             feed_type: None,
         }];
 
-        let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));
+        let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));
 
-        let expected = normalize_tokens(quote! {
+        let expected = normalize_tokens(&quote! {
             #[cfg(target_family = "wasm")]
             mod __contract_extern_wrappers {
                 use super::*;
@@ -403,9 +403,9 @@ mod tests {
             feed_type: None,
         }];
 
-        let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));
+        let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));
 
-        let expected = normalize_tokens(quote! {
+        let expected = normalize_tokens(&quote! {
             #[cfg(target_family = "wasm")]
             mod __contract_extern_wrappers {
                 use super::*;
@@ -448,9 +448,9 @@ mod tests {
             feed_type: None,
         }];
 
-        let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));
+        let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));
 
-        let expected = normalize_tokens(quote! {
+        let expected = normalize_tokens(&quote! {
             #[cfg(target_family = "wasm")]
             mod __contract_extern_wrappers {
                 use super::*;
@@ -493,9 +493,9 @@ mod tests {
             },
         ];
 
-        let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));
+        let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));
 
-        let expected = normalize_tokens(quote! {
+        let expected = normalize_tokens(&quote! {
             #[cfg(target_family = "wasm")]
             mod __contract_extern_wrappers {
                 use super::*;
@@ -530,9 +530,9 @@ mod tests {
             feed_type: None,
         }];
 
-        let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));
+        let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));
 
-        let expected = normalize_tokens(quote! {
+        let expected = normalize_tokens(&quote! {
             #[cfg(target_family = "wasm")]
             mod __contract_extern_wrappers {
                 use super::*;
@@ -567,9 +567,9 @@ mod tests {
             feed_type: None,
         }];
 
-        let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));
+        let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));
 
-        let expected = normalize_tokens(quote! {
+        let expected = normalize_tokens(&quote! {
             #[cfg(target_family = "wasm")]
             mod __contract_extern_wrappers {
                 use super::*;
@@ -604,9 +604,9 @@ mod tests {
             feed_type: None,
         }];
 
-        let output = normalize_tokens(extern_wrappers(&functions, &contract_ident));
+        let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));
 
-        let expected = normalize_tokens(quote! {
+        let expected = normalize_tokens(&quote! {
             #[cfg(target_family = "wasm")]
             mod __contract_extern_wrappers {
                 use super::*;
@@ -624,9 +624,9 @@ mod tests {
     #[test]
     fn test_state_static() {
         let contract_ident = format_ident!("MyContract");
-        let output = normalize_tokens(state_static(&contract_ident));
+        let output = normalize_tokens(&state_static(&contract_ident));
 
-        let expected = normalize_tokens(quote! {
+        let expected = normalize_tokens(&quote! {
             /// Static contract state initialized via `new()`.
             #[cfg(target_family = "wasm")]
             static mut STATE: MyContract = MyContract::new();

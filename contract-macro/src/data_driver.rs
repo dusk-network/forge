@@ -215,7 +215,7 @@ mod tests {
 
     /// Normalize token stream to a string with consistent whitespace for
     /// comparison.
-    fn normalize_tokens(tokens: TokenStream2) -> String {
+    fn normalize_tokens(tokens: &TokenStream2) -> String {
         tokens
             .to_string()
             .split_whitespace()
@@ -261,7 +261,7 @@ mod tests {
 
         let arms = generate_encode_input_arms(&functions, &type_map);
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
 
         assert!(
             arm_str.contains("\"store\""),
@@ -286,7 +286,7 @@ mod tests {
         let arms = generate_encode_input_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("\"init\""), "Should contain function name");
         assert!(arm_str.contains("json_to_rkyv"), "Should use json_to_rkyv");
         assert!(
@@ -303,7 +303,7 @@ mod tests {
         let arms = generate_encode_input_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("\"is_paused\""));
         assert!(arm_str.contains("json_to_rkyv :: < () >"));
     }
@@ -325,14 +325,13 @@ mod tests {
         let arms = generate_encode_input_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("\"transfer\""));
         assert!(arm_str.contains("json_to_rkyv"));
         // Verify the resolved tuple type is used
         assert!(
             arm_str.contains("my_crate :: Address"),
-            "Should use resolved type in tuple: {}",
-            arm_str
+            "Should use resolved type in tuple: {arm_str}"
         );
     }
 
@@ -350,7 +349,7 @@ mod tests {
         assert_eq!(arms.len(), 3);
 
         // Verify each function is present in the generated arms
-        let all_arms: String = arms.iter().map(|a| normalize_tokens(a.clone())).collect();
+        let all_arms: String = arms.iter().map(normalize_tokens).collect();
         assert!(all_arms.contains("\"pause\""), "Should contain pause");
         assert!(all_arms.contains("\"unpause\""), "Should contain unpause");
         assert!(all_arms.contains("\"init\""), "Should contain init");
@@ -369,7 +368,7 @@ mod tests {
         let arms = generate_decode_input_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("\"deposit\""));
         assert!(arm_str.contains("rkyv_to_json"));
         assert!(arm_str.contains("my_crate :: Deposit"));
@@ -392,19 +391,17 @@ mod tests {
         let arms = generate_decode_input_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("\"transfer_with_fee\""));
         assert!(arm_str.contains("rkyv_to_json"));
         // Verify the resolved tuple type is used
         assert!(
             arm_str.contains("my_crate :: Address"),
-            "Should use resolved Address type in tuple: {}",
-            arm_str
+            "Should use resolved Address type in tuple: {arm_str}"
         );
         assert!(
             arm_str.contains("my_crate :: MyAddr"),
-            "Should use resolved MyAddr type in tuple: {}",
-            arm_str
+            "Should use resolved MyAddr type in tuple: {arm_str}"
         );
     }
 
@@ -420,7 +417,7 @@ mod tests {
         let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("\"pause\""));
         assert!(arm_str.contains("Ok"));
         assert!(arm_str.contains("JsonValue :: Null"));
@@ -443,7 +440,7 @@ mod tests {
         let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("\"finalization_period\""));
         assert!(arm_str.contains("rkyv_to_json_u64"));
         // Verify it does NOT use the generic rkyv_to_json::<u64>
@@ -461,7 +458,7 @@ mod tests {
         let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("\"is_paused\""));
         assert!(arm_str.contains("rkyv_to_json :: < bool >"));
         // Verify it does NOT use the special handlers for unit or u64
@@ -485,14 +482,13 @@ mod tests {
         let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("\"pending_withdrawal\""));
         assert!(arm_str.contains("rkyv_to_json"));
         // Verify the resolved type is used
         assert!(
             arm_str.contains("my_crate :: PendingItem"),
-            "Should use resolved type: {}",
-            arm_str
+            "Should use resolved type: {arm_str}"
         );
     }
 
@@ -500,7 +496,7 @@ mod tests {
     // feed_type tests (for functions using abi::feed)
     // =========================================================================
 
-    /// Helper to create a FunctionInfo with a feed_type.
+    /// Helper to create a `FunctionInfo` with a `feed_type`.
     fn make_function_with_feed(
         name: &str,
         input: TokenStream2,
@@ -538,23 +534,20 @@ mod tests {
         let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("\"pending_withdrawals\""));
         // Should use the feed type, not return JsonValue::Null
         assert!(
             !arm_str.contains("JsonValue :: Null"),
-            "Should NOT return Null when feed_type is present: {}",
-            arm_str
+            "Should NOT return Null when feed_type is present: {arm_str}"
         );
         assert!(
             arm_str.contains("rkyv_to_json"),
-            "Should use rkyv_to_json with feed type: {}",
-            arm_str
+            "Should use rkyv_to_json with feed type: {arm_str}"
         );
         assert!(
             arm_str.contains("my_crate :: ItemId"),
-            "Should use resolved feed type: {}",
-            arm_str
+            "Should use resolved feed type: {arm_str}"
         );
     }
 
@@ -573,12 +566,11 @@ mod tests {
         let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("\"finalized_withdrawals\""));
         assert!(
             arm_str.contains("my_crate :: ItemId"),
-            "Should use resolved feed type: {}",
-            arm_str
+            "Should use resolved feed type: {arm_str}"
         );
     }
 
@@ -591,7 +583,7 @@ mod tests {
         let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("rkyv_to_json :: < bool >"));
     }
 
@@ -609,12 +601,11 @@ mod tests {
         let arms = generate_decode_output_arms(&functions, &type_map);
 
         assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
+        let arm_str = normalize_tokens(&arms[0]);
         assert!(arm_str.contains("\"get_count\""));
         assert!(
             arm_str.contains("rkyv_to_json_u64"),
-            "u64 feed_type should use rkyv_to_json_u64: {}",
-            arm_str
+            "u64 feed_type should use rkyv_to_json_u64: {arm_str}"
         );
     }
 
@@ -634,7 +625,7 @@ mod tests {
         let blocks = generate_decode_event_blocks(&events, &type_map);
 
         assert_eq!(blocks.len(), 1);
-        let block_str = normalize_tokens(blocks[0].clone());
+        let block_str = normalize_tokens(&blocks[0]);
         // Topics come from the type's ContractEvent impl, dispatched via the
         // resolved path.
         assert!(
@@ -657,7 +648,7 @@ mod tests {
         let blocks = generate_decode_event_blocks(&events, &type_map);
 
         assert_eq!(blocks.len(), 1);
-        let block_str = normalize_tokens(blocks[0].clone());
+        let block_str = normalize_tokens(&blocks[0]);
         assert!(block_str.contains("< PauseEvent as dusk_forge :: ContractEvent > :: TOPICS"));
         assert!(block_str.contains("rkyv_to_json :: < PauseEvent >"));
     }
@@ -673,7 +664,7 @@ mod tests {
         let blocks = generate_decode_event_blocks(&events, &type_map);
 
         assert_eq!(blocks.len(), 2, "one block per registered type");
-        let all: String = blocks.iter().map(|b| normalize_tokens(b.clone())).collect();
+        let all: String = blocks.iter().map(normalize_tokens).collect();
         assert!(all.contains("PauseToggled"));
         assert!(all.contains("ItemAdded"));
     }
@@ -695,7 +686,7 @@ mod tests {
         let events = vec![make_event(quote! { PauseEvent })];
 
         let output = module(&type_map, &functions, &events);
-        let output_str = normalize_tokens(output);
+        let output_str = normalize_tokens(&output);
 
         // Verify module structure
         assert!(output_str.contains("pub mod data_driver"));
