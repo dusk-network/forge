@@ -240,8 +240,8 @@ dusk-data-driver = { version = "0.3", optional = true }  # Only for data-driver
 dusk-forge = "0.3"
 
 [dev-dependencies]
-dusk-core = "1.4"   # Same types, but for host-side tests
-dusk-vm = "0.1"     # To run contract in tests
+dusk-core = "1.6"   # Same types, but for host-side tests
+dusk-vm = "1.6"     # To run contract in tests
 ```
 
 ### Features
