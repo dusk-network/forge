@@ -337,7 +337,7 @@ fn output_type(ret: &ReturnType) -> (TokenStream2, bool) {
 mod tests {
     use super::*;
 
-    fn normalize_tokens(tokens: TokenStream2) -> String {
+    fn normalize_tokens(tokens: &TokenStream2) -> String {
         tokens
             .to_string()
             .split_whitespace()
@@ -353,7 +353,7 @@ mod tests {
     fn test_output_type_value() {
         let ret: ReturnType = syn::parse_quote! { -> u64 };
         let (ty, returns_ref) = output_type(&ret);
-        assert_eq!(normalize_tokens(ty), "u64");
+        assert_eq!(normalize_tokens(&ty), "u64");
         assert!(!returns_ref);
     }
 
@@ -361,7 +361,7 @@ mod tests {
     fn test_output_type_ref() {
         let ret: ReturnType = syn::parse_quote! { -> &LargeStruct };
         let (ty, returns_ref) = output_type(&ret);
-        assert_eq!(normalize_tokens(ty), "LargeStruct");
+        assert_eq!(normalize_tokens(&ty), "LargeStruct");
         assert!(returns_ref);
     }
 
@@ -369,7 +369,7 @@ mod tests {
     fn test_output_type_mut_ref() {
         let ret: ReturnType = syn::parse_quote! { -> &mut Data };
         let (ty, returns_ref) = output_type(&ret);
-        assert_eq!(normalize_tokens(ty), "Data");
+        assert_eq!(normalize_tokens(&ty), "Data");
         assert!(returns_ref);
     }
 
@@ -385,7 +385,7 @@ mod tests {
         let params = parameters(&method);
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name.to_string(), "data");
-        assert_eq!(normalize_tokens(params[0].ty.clone()), "LargeStruct");
+        assert_eq!(normalize_tokens(&params[0].ty), "LargeStruct");
         assert!(params[0].is_ref);
         assert!(!params[0].is_mut_ref);
     }
@@ -398,7 +398,7 @@ mod tests {
         let params = parameters(&method);
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name.to_string(), "data");
-        assert_eq!(normalize_tokens(params[0].ty.clone()), "Data");
+        assert_eq!(normalize_tokens(&params[0].ty), "Data");
         assert!(params[0].is_ref);
         assert!(params[0].is_mut_ref);
     }

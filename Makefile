@@ -30,7 +30,7 @@ cq: ## Run code quality checks (formatting + clippy)
 
 clippy: ## Run clippy on all workspace members
 	@echo "Running clippy..."
-	@cargo clippy --all-targets -- -D warnings
+	@cargo clippy --workspace --exclude test-contract --all-targets -- -D warnings
 	@$(MAKE) -C tests/test-contract clippy
 
 clean: ## Clean all build artifacts
