@@ -5,7 +5,7 @@ Dusk Forge
 <img src="assets/dusk-forge-illustration.png"  alt="Dusk Forge Illustration"></img>
 <p align="center">
 
-<a href="https://github.com/HDauven/dusk-forge" target="_blank">
+<a href="https://github.com/dusk-network/forge" target="_blank">
   <img src="https://img.shields.io/badge/github-dusk%20forge-blueviolet?logo=github" alt="Repository">
 </a>
 <a href="https://docs.rs/dusk-forge/" target="_blank">
