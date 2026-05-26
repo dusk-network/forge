@@ -47,7 +47,7 @@ rust-version = "1.85"
 [target.'cfg(target_family = "wasm")'.dependencies]
 dusk-core = { version = "1.6", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0" }
 dusk-data-driver = { version = "0.3", optional = true }
-dusk-forge = "0.2.2"
+dusk-forge = "0.3.0"
 
 # -----------------------------------------------------------------------------
 # Dev Dependencies (for tests running on the host, not in WASM)

@@ -5,7 +5,7 @@ Dusk Forge
 <img src="assets/dusk-forge-illustration.png"  alt="Dusk Forge Illustration"></img>
 <p align="center">
 
-<a href="https://github.com/HDauven/dusk-forge" target="_blank">
+<a href="https://github.com/dusk-network/forge" target="_blank">
   <img src="https://img.shields.io/badge/github-dusk%20forge-blueviolet?logo=github" alt="Repository">
 </a>
 <a href="https://docs.rs/dusk-forge/" target="_blank">
@@ -237,11 +237,11 @@ All runtime dependencies go in the WASM-only section because contracts are gated
 [target.'cfg(target_family = "wasm")'.dependencies]
 dusk-core = "1.4"
 dusk-data-driver = { version = "0.3", optional = true }  # Only for data-driver
-dusk-forge = "0.1"
+dusk-forge = "0.3"
 
 [dev-dependencies]
-dusk-core = "1.4"   # Same types, but for host-side tests
-dusk-vm = "0.1"     # To run contract in tests
+dusk-core = "1.6"   # Same types, but for host-side tests
+dusk-vm = "1.6"     # To run contract in tests
 ```
 
 ### Features
