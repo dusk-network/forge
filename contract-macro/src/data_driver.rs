@@ -17,6 +17,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 
 use crate::parse::{EventInfo, FunctionInfo};
+use crate::resolve;
 use crate::resolve::TypeMap;
 
 /// Generate the `data_driver` module at crate root level.
@@ -28,7 +29,7 @@ pub(crate) fn module(
     let encode_input_arms = generate_encode_input_arms(functions, type_map);
     let decode_input_arms = generate_decode_input_arms(functions, type_map);
     let decode_output_arms = generate_decode_output_arms(functions, type_map);
-    let decode_event_arms = generate_decode_event_arms(events, type_map);
+    let decode_event_blocks = generate_decode_event_blocks(events, type_map);
 
     quote! {
         /// Auto-generated data driver module.
@@ -92,12 +93,10 @@ pub(crate) fn module(
                     event_name: &str,
                     rkyv: &[u8],
                 ) -> Result<dusk_data_driver::JsonValue, dusk_data_driver::Error> {
-                    match event_name {
-                        #(#decode_event_arms,)*
-                        name => Err(dusk_data_driver::Error::Unsupported(
-                            alloc::format!("decode_event: unknown event {name}")
-                        ))
-                    }
+                    #(#decode_event_blocks)*
+                    Err(dusk_data_driver::Error::Unsupported(
+                        alloc::format!("decode_event: unknown event {event_name}")
+                    ))
                 }
 
                 fn get_schema(&self) -> String {
@@ -112,28 +111,13 @@ pub(crate) fn module(
     }
 }
 
-/// Get the resolved type path from the `type_map`, or return the original if
-/// not found.
-fn get_resolved_type(ty: &TokenStream2, type_map: &TypeMap) -> TokenStream2 {
-    let key = ty.to_string();
-    if let Some(resolved) = type_map.get(&key) {
-        // Parse the resolved string back into tokens as a Type (not Path, since tuples
-        // aren't paths)
-        if let Ok(resolved_type) = syn::parse_str::<syn::Type>(resolved) {
-            return quote! { #resolved_type };
-        }
-    }
-    // Fallback to original
-    ty.clone()
-}
-
 /// Generate match arms for `encode_input_fn`.
 fn generate_encode_input_arms(functions: &[FunctionInfo], type_map: &TypeMap) -> Vec<TokenStream2> {
     functions
         .iter()
         .map(|f| {
             let name_str = f.name.to_string();
-            let input_type = get_resolved_type(&f.input_type, type_map);
+            let input_type = resolve::resolved_tokens(&f.input_type, type_map);
             quote! {
                 #name_str => dusk_data_driver::json_to_rkyv::<#input_type>(json)
             }
@@ -147,7 +131,7 @@ fn generate_decode_input_arms(functions: &[FunctionInfo], type_map: &TypeMap) ->
         .iter()
         .map(|f| {
             let name_str = f.name.to_string();
-            let input_type = get_resolved_type(&f.input_type, type_map);
+            let input_type = resolve::resolved_tokens(&f.input_type, type_map);
             quote! {
                 #name_str => dusk_data_driver::rkyv_to_json::<#input_type>(rkyv)
             }
@@ -172,12 +156,12 @@ fn generate_decode_output_arms(
             // Use feed_type if present, otherwise use output_type
             let (decode_type, type_str) = if let Some(feed_type) = &f.feed_type {
                 (
-                    get_resolved_type(feed_type, type_map),
+                    resolve::resolved_tokens(feed_type, type_map),
                     feed_type.to_string(),
                 )
             } else {
                 (
-                    get_resolved_type(&f.output_type, type_map),
+                    resolve::resolved_tokens(&f.output_type, type_map),
                     f.output_type.to_string(),
                 )
             };
@@ -199,35 +183,22 @@ fn generate_decode_output_arms(
         .collect()
 }
 
-/// Generate match arms for `decode_event`.
-fn generate_decode_event_arms(events: &[EventInfo], type_map: &TypeMap) -> Vec<TokenStream2> {
+/// Generate one linear-scan block per registered event type for
+/// `decode_event`.
+///
+/// Each block checks the incoming `event_name` against the type's
+/// `ContractEvent::TOPICS` slice; a match decodes the rkyv bytes as that type.
+/// No per-topic match arm is emitted, so dynamic and multi-topic events are
+/// handled uniformly on stable Rust.
+fn generate_decode_event_blocks(events: &[EventInfo], type_map: &TypeMap) -> Vec<TokenStream2> {
     events
         .iter()
-        .filter_map(|e| {
-            let topic_str = &e.topic;
-            let data_type = get_resolved_type(&e.data_type, type_map);
-
-            // Get the resolved topic path from the type_map
-            let resolved_topic = type_map
-                .get(topic_str)
-                .map_or(topic_str.clone(), Clone::clone);
-
-            // Try to parse the resolved topic as a path for constant resolution
-            if let Ok(topic_path) = syn::parse_str::<syn::Path>(&resolved_topic) {
-                // Skip variable references (single lowercase identifier)
-                if topic_path.segments.len() == 1 {
-                    let name = topic_path.segments[0].ident.to_string();
-                    if name.starts_with(char::is_lowercase) {
-                        return None;
-                    }
+        .map(|e| {
+            let data_type = resolve::resolved_tokens(&e.data_type, type_map);
+            quote! {
+                if <#data_type as dusk_forge::ContractEvent>::TOPICS.contains(&event_name) {
+                    return dusk_data_driver::rkyv_to_json::<#data_type>(rkyv);
                 }
-                Some(quote! {
-                    #topic_path => dusk_data_driver::rkyv_to_json::<#data_type>(rkyv)
-                })
-            } else {
-                Some(quote! {
-                    #resolved_topic => dusk_data_driver::rkyv_to_json::<#data_type>(rkyv)
-                })
             }
         })
         .collect()
@@ -268,46 +239,18 @@ mod tests {
     }
 
     /// Create an `EventInfo` for testing.
-    fn make_event(topic: &str, data_type: TokenStream2) -> EventInfo {
-        EventInfo {
-            topic: topic.to_string(),
-            data_type,
-        }
-    }
-
-    // =========================================================================
-    // get_resolved_type tests
-    // =========================================================================
-
-    #[test]
-    fn test_get_resolved_type_found_in_map() {
-        let mut type_map = HashMap::new();
-        type_map.insert("Address".to_string(), "my_crate::Address".to_string());
-
-        let ty = quote! { Address };
-        let resolved = get_resolved_type(&ty, &type_map);
-
-        assert_eq!(normalize_tokens(resolved), "my_crate :: Address");
+    fn make_event(data_type: TokenStream2) -> EventInfo {
+        EventInfo { data_type }
     }
 
     #[test]
-    fn test_get_resolved_type_not_in_map() {
-        let type_map = HashMap::new();
-
-        let ty = quote! { u64 };
-        let resolved = get_resolved_type(&ty, &type_map);
-
-        assert_eq!(normalize_tokens(resolved), "u64");
-    }
-
-    #[test]
-    fn test_get_resolved_type_not_in_map_preserved_in_generated_arms() {
-        // Companion to `test_get_resolved_type_not_in_map`: the fallback must
-        // survive end-to-end through arm generation. If the input type isn't
-        // in the type_map, the original token stream is what downstream
-        // consumers (the schema and the WASM data-driver match arms) see —
-        // a regression that flipped this fallback would silently produce an
-        // empty or default type, breaking decoding without any compile error.
+    fn test_unresolved_type_preserved_in_generated_arms() {
+        // The resolver fallback must survive end-to-end through arm
+        // generation. If the input type isn't in the type_map, the original
+        // token stream is what downstream consumers (the schema and the WASM
+        // data-driver match arms) see — a regression that flipped this
+        // fallback would silently produce an empty or default type, breaking
+        // decoding without any compile error.
         let type_map = HashMap::new();
 
         let functions = vec![make_function(
@@ -328,17 +271,6 @@ mod tests {
             arm_str.contains("UnknownPayload"),
             "unresolved type name appears verbatim in the generated arm: {arm_str}"
         );
-    }
-
-    #[test]
-    fn test_get_resolved_type_complex_path() {
-        let mut type_map = HashMap::new();
-        type_map.insert("Deposit".to_string(), "my_crate::Deposit".to_string());
-
-        let ty = quote! { Deposit };
-        let resolved = get_resolved_type(&ty, &type_map);
-
-        assert_eq!(normalize_tokens(resolved), "my_crate :: Deposit");
     }
 
     // =========================================================================
@@ -687,144 +619,63 @@ mod tests {
     }
 
     // =========================================================================
-    // generate_decode_event_arms tests
+    // generate_decode_event_blocks tests
     // =========================================================================
 
     #[test]
-    fn test_decode_event_with_const_topic() {
+    fn test_decode_event_block_resolves_type() {
         let mut type_map = HashMap::new();
-        type_map.insert(
-            "events::PauseToggled::PAUSED".to_string(),
-            "my_crate::events::PauseToggled::PAUSED".to_string(),
-        );
         type_map.insert(
             "events :: PauseToggled".to_string(),
             "my_crate::events::PauseToggled".to_string(),
         );
 
-        let events = vec![make_event(
-            "events::PauseToggled::PAUSED",
-            quote! { events::PauseToggled },
-        )];
-        let arms = generate_decode_event_arms(&events, &type_map);
+        let events = vec![make_event(quote! { events::PauseToggled })];
+        let blocks = generate_decode_event_blocks(&events, &type_map);
 
-        assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
-        // Verify topic is resolved
+        assert_eq!(blocks.len(), 1);
+        let block_str = normalize_tokens(blocks[0].clone());
+        // Topics come from the type's ContractEvent impl, dispatched via the
+        // resolved path.
         assert!(
-            arm_str.contains("my_crate :: events :: PauseToggled :: PAUSED"),
-            "Topic should be resolved: {}",
-            arm_str
+            block_str.contains(
+                "< my_crate :: events :: PauseToggled as dusk_forge :: ContractEvent > :: TOPICS . contains (& event_name)"
+            ),
+            "block should scan the resolved type's TOPICS: {block_str}"
         );
-        // Verify data type is resolved
         assert!(
-            arm_str.contains("rkyv_to_json :: < my_crate :: events :: PauseToggled >"),
-            "Data type should be resolved: {}",
-            arm_str
+            block_str.contains("rkyv_to_json :: < my_crate :: events :: PauseToggled >"),
+            "block should decode to the resolved type: {block_str}"
         );
     }
 
     #[test]
-    fn test_decode_event_with_multi_segment_topic() {
+    fn test_decode_event_block_unresolved_type_passes_through() {
         let type_map = HashMap::new();
 
-        // Multi-segment paths are kept regardless of case
-        let events = vec![make_event("events::Paused", quote! { PauseEvent })];
-        let arms = generate_decode_event_arms(&events, &type_map);
+        let events = vec![make_event(quote! { PauseEvent })];
+        let blocks = generate_decode_event_blocks(&events, &type_map);
 
-        assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
-        assert!(arm_str.contains("events :: Paused"));
-        assert!(arm_str.contains("rkyv_to_json :: < PauseEvent >"));
+        assert_eq!(blocks.len(), 1);
+        let block_str = normalize_tokens(blocks[0].clone());
+        assert!(block_str.contains("< PauseEvent as dusk_forge :: ContractEvent > :: TOPICS"));
+        assert!(block_str.contains("rkyv_to_json :: < PauseEvent >"));
     }
 
     #[test]
-    fn test_decode_event_skips_lowercase_variable() {
+    fn test_decode_event_one_block_per_registered_type() {
         let type_map = HashMap::new();
-
-        // Lowercase single identifier should be skipped (it's a variable reference)
-        let events = vec![make_event("topic", quote! { SomeEvent })];
-        let arms = generate_decode_event_arms(&events, &type_map);
-
-        assert_eq!(arms.len(), 0, "Should skip lowercase variable reference");
-    }
-
-    #[test]
-    fn test_decode_event_uppercase_single_ident_kept() {
-        let type_map = HashMap::new();
-
-        // Uppercase single identifier should be kept (it's a constant)
-        let events = vec![make_event("PAUSED", quote! { PauseEvent })];
-        let arms = generate_decode_event_arms(&events, &type_map);
-
-        assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
-        assert!(arm_str.contains("PAUSED"));
-        // Verify the data type is also included
-        assert!(
-            arm_str.contains("rkyv_to_json :: < PauseEvent >"),
-            "Should decode to PauseEvent type: {}",
-            arm_str
-        );
-    }
-
-    #[test]
-    fn test_decode_event_string_literal_topic() {
-        let type_map = HashMap::new();
-
-        // A string literal topic that cannot be parsed as a syn::Path
-        // (e.g., contains characters not valid in Rust paths)
-        let events = vec![make_event("custom/event", quote! { TransferEvent })];
-        let arms = generate_decode_event_arms(&events, &type_map);
-
-        assert_eq!(arms.len(), 1);
-        let arm_str = normalize_tokens(arms[0].clone());
-        // String literal topics are used directly in the match arm
-        assert!(
-            arm_str.contains("\"custom/event\""),
-            "Should use string literal topic: {}",
-            arm_str
-        );
-        assert!(
-            arm_str.contains("rkyv_to_json :: < TransferEvent >"),
-            "Should decode to TransferEvent type: {}",
-            arm_str
-        );
-    }
-
-    #[test]
-    fn test_decode_event_multiple_events() {
-        let mut type_map = HashMap::new();
-        type_map.insert(
-            "events::PauseToggled::PAUSED".to_string(),
-            "my_crate::events::PauseToggled::PAUSED".to_string(),
-        );
-        type_map.insert(
-            "events::ItemAdded::TOPIC".to_string(),
-            "my_crate::events::ItemAdded::TOPIC".to_string(),
-        );
 
         let events = vec![
-            make_event("events::PauseToggled::PAUSED", quote! { PauseToggled }),
-            make_event("events::ItemAdded::TOPIC", quote! { ItemAdded }),
+            make_event(quote! { PauseToggled }),
+            make_event(quote! { ItemAdded }),
         ];
-        let arms = generate_decode_event_arms(&events, &type_map);
+        let blocks = generate_decode_event_blocks(&events, &type_map);
 
-        assert_eq!(arms.len(), 2);
-
-        // Verify both events are present with correct resolved topics
-        let all_arms: String = arms.iter().map(|a| normalize_tokens(a.clone())).collect();
-        assert!(
-            all_arms.contains("my_crate :: events :: PauseToggled :: PAUSED"),
-            "Should contain resolved PauseToggled topic"
-        );
-        assert!(
-            all_arms.contains("my_crate :: events :: ItemAdded :: TOPIC"),
-            "Should contain resolved ItemAdded topic"
-        );
-        // Verify data types are present
-        assert!(all_arms.contains("PauseToggled"));
-        assert!(all_arms.contains("ItemAdded"));
+        assert_eq!(blocks.len(), 2, "one block per registered type");
+        let all: String = blocks.iter().map(|b| normalize_tokens(b.clone())).collect();
+        assert!(all.contains("PauseToggled"));
+        assert!(all.contains("ItemAdded"));
     }
 
     // =========================================================================
@@ -841,7 +692,7 @@ mod tests {
             make_function("is_paused", quote! { () }, quote! { bool }),
         ];
 
-        let events = vec![make_event("PAUSED", quote! { PauseEvent })];
+        let events = vec![make_event(quote! { PauseEvent })];
 
         let output = module(&type_map, &functions, &events);
         let output_str = normalize_tokens(output);

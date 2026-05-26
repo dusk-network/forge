@@ -13,7 +13,7 @@
 //! # Pipeline
 //!
 //! 1. [`parse::analyze`] walks the user module and produces an
-//!    [`parse::Analysis`] (functions, deduplicated events, imports, contract
+//!    [`parse::Analysis`] (functions, registered events, imports, contract
 //!    identifier).
 //! 2. [`generate`] / [`data_driver`] consume the analysis and emit the contract
 //!    or data-driver bindings.
@@ -78,8 +78,13 @@ use syn::{ItemMod, parse_macro_input};
 /// - A public method consumes `self` instead of borrowing it
 /// - A public method uses `impl Trait` in parameters or return type
 #[proc_macro_attribute]
-pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn contract(attr: TokenStream, item: TokenStream) -> TokenStream {
     let module = parse_macro_input!(item as ItemMod);
+
+    let registered_events = match parse::events::module_events(attr.into()) {
+        Ok(events) => events,
+        Err(e) => return e.to_compile_error().into(),
+    };
 
     let Some((_, items)) = &module.content else {
         return syn::Error::new_spanned(&module, "#[contract] requires a module with content")
@@ -87,7 +92,7 @@ pub fn contract(_attr: TokenStream, item: TokenStream) -> TokenStream {
             .into();
     };
 
-    let analysis = match parse::analyze(&module, items) {
+    let analysis = match parse::analyze(&module, items, &registered_events) {
         Ok(analysis) => analysis,
         Err(e) => return e.to_compile_error().into(),
     };

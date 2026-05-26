@@ -4,39 +4,103 @@
 //
 // Copyright (c) DUSK NETWORK. All rights reserved.
 
-//! Event extraction from impl blocks: `abi::emit()` call-site discovery,
-//! `abi::feed()` call-site discovery, and `#[contract(emits = [...])]`
-//! attribute collection.
+//! Event handling: parsing the `#[contract(events = [...])]` module
+//! attribute, validating `abi::emit()` call sites against the registered
+//! set, and discovering `abi::feed()` call sites.
 
 use std::collections::HashSet;
 
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
 use syn::visit::Visit;
-use syn::{Expr, ExprCall, ExprLit, ExprPath, ImplItemFn, ItemImpl, Lit};
+use syn::{
+    Error as SynError, Expr, ExprCall, ExprPath, Ident, ImplItemFn, ItemImpl, Path, Token,
+    bracketed, parse2,
+};
 
-use super::model::EventInfo;
+use crate::parse::ImportInfo;
+use crate::resolve;
 
-/// Visitor to find `abi::emit()` calls within function bodies.
-struct EmitVisitor {
-    /// Collected events.
-    events: Vec<EventInfo>,
+/// Parse the `#[contract(events = [...])]` module attribute into the list of
+/// registered event type paths.
+///
+/// An empty attribute (`#[contract]`) yields an empty list. Any other shape
+/// must be `events = [path::A, path::B, ...]`; malformed input surfaces as a
+/// span-anchored `syn::Error`.
+pub(crate) fn module_events(attr: TokenStream2) -> Result<Vec<Path>, SynError> {
+    if attr.is_empty() {
+        return Ok(Vec::new());
+    }
+    let parsed: EventsAttr = parse2(attr)?;
+
+    // The registered set is unique by construction; a repeated path would
+    // double its schema entry and `decode_event` block.
+    let mut seen = HashSet::new();
+    for path in &parsed.paths {
+        if !seen.insert(quote!(#path).to_string()) {
+            return Err(SynError::new_spanned(
+                path,
+                format!(
+                    "event type `{}` is registered more than once",
+                    quote!(#path)
+                ),
+            ));
+        }
+    }
+
+    Ok(parsed.paths)
 }
 
-impl EmitVisitor {
-    /// Create a new empty visitor.
-    fn new() -> Self {
-        Self { events: Vec::new() }
+/// The parsed `events = [...]` module attribute.
+struct EventsAttr {
+    paths: Vec<Path>,
+}
+
+impl Parse for EventsAttr {
+    fn parse(input: ParseStream) -> Result<Self, SynError> {
+        let keyword: Ident = input.parse()?;
+        if keyword != "events" {
+            return Err(SynError::new(
+                keyword.span(),
+                format!("unknown contract directive `{keyword}`; expected `events = [...]`"),
+            ));
+        }
+        input
+            .parse::<Token![=]>()
+            .map_err(|_| SynError::new(keyword.span(), "expected `events = [Type, ...]`"))?;
+        let content;
+        bracketed!(content in input);
+        let paths = Punctuated::<Path, Token![,]>::parse_terminated(&content)?
+            .into_iter()
+            .collect();
+        Ok(Self { paths })
     }
 }
 
-impl<'ast> Visit<'ast> for EmitVisitor {
+/// Build the lookup set of registered event type paths, each resolved through
+/// the module imports so emit-site types compare equal regardless of whether
+/// they are written in qualified or imported short form.
+pub(super) fn registered_keys(events: &[Path], imports: &[ImportInfo]) -> HashSet<String> {
+    events
+        .iter()
+        .map(|p| resolve::resolve_type_str(&quote!(#p), imports))
+        .collect()
+}
+
+/// Visitor collecting the data-argument expression of every `abi::emit()`
+/// call so its type can be checked against the registered set.
+struct EmitVisitor<'ast> {
+    /// The second argument (event data) of each discovered emit call.
+    data_exprs: Vec<&'ast Expr>,
+}
+
+impl<'ast> Visit<'ast> for EmitVisitor<'ast> {
     fn visit_expr_call(&mut self, node: &'ast ExprCall) {
-        // Check if this is an abi::emit() call
         if let Expr::Path(ExprPath { path, .. }) = &*node.func {
             let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
 
-            // Match abi::emit or just emit
             let is_emit = matches!(
                 segments
                     .iter()
@@ -47,22 +111,76 @@ impl<'ast> Visit<'ast> for EmitVisitor {
             );
 
             if is_emit && node.args.len() >= 2 {
-                // First arg is the topic - can be a string literal or a const path
-                let topic = topic_from_expr(node.args.first().unwrap());
-
-                if let Some(topic) = topic {
-                    // Second arg is the event data - extract its type
-                    let data_expr = &node.args[1];
-                    let data_type = type_from_expr(data_expr);
-
-                    self.events.push(EventInfo { topic, data_type });
-                }
+                self.data_exprs.push(&node.args[1]);
             }
         }
 
-        // Continue visiting nested expressions
         syn::visit::visit_expr_call(self, node);
     }
+}
+
+/// Validate that every `abi::emit()` call inside an impl block emits a
+/// registered event type.
+///
+/// The data argument's type path is extracted and compared against the set
+/// declared in `#[contract(events = [...])]`. An emit of an unregistered type
+/// produces a `compile_error!` anchored at the offending call. Topic
+/// expressions are not checked here — decode-time scanning catches typos.
+///
+/// Only emits whose data argument is a concrete, nameable type path are
+/// checked. A field access (`self.evt`), a function result (`build_event()`),
+/// or a local binding (`let e = ..; emit(t, e)`) cannot be resolved to a type
+/// syntactically, so they are skipped — an accepted false negative, mirroring
+/// the way helpers outside the contract module are never walked. The
+/// registered list stays the source of truth for the schema.
+///
+/// The emit-site type is resolved through `imports` before comparison, so it
+/// matches the registered set whether written qualified or in imported short
+/// form. Only impl blocks within the contract module are walked.
+pub(super) fn validate_emitted_types(
+    impl_block: &ItemImpl,
+    registered: &HashSet<String>,
+    imports: &[ImportInfo],
+) -> Result<(), SynError> {
+    let mut visitor = EmitVisitor {
+        data_exprs: Vec::new(),
+    };
+    visitor.visit_item_impl(impl_block);
+
+    for data_expr in visitor.data_exprs {
+        let ty = type_from_expr(data_expr);
+        if !is_checkable_type(&ty) {
+            continue;
+        }
+        if !registered.contains(&resolve::resolve_type_str(&ty, imports)) {
+            return Err(SynError::new_spanned(
+                data_expr,
+                format!(
+                    "event type `{ty}` is emitted but not registered; \
+                     add it to the `#[contract(events = [...])]` list"
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Decide whether an extracted emit-data type is a concrete type path worth
+/// checking against the registered set.
+///
+/// Type names are conventionally upper-camel-case, so a path whose final
+/// segment starts lowercase (a local binding, a free-function call, or a
+/// primitive) is treated as unresolvable and skipped, as is the `()` fallback
+/// `type_from_expr` returns for shapes it can't read (field access, etc.).
+fn is_checkable_type(ty: &TokenStream2) -> bool {
+    let Ok(path) = syn::parse2::<Path>(ty.clone()) else {
+        return false;
+    };
+    path.segments
+        .last()
+        .and_then(|seg| seg.ident.to_string().chars().next())
+        .is_some_and(char::is_uppercase)
 }
 
 /// Visitor to detect `abi::feed()` calls within function bodies.
@@ -153,66 +271,12 @@ pub(super) fn validate_feed_type_match(
     }
 }
 
-/// Deduplicate a list of events by topic, keeping the first occurrence.
-///
-/// Two events sharing a topic but registering structurally different data
-/// types collapse to the first-seen entry; the rest are dropped silently
-/// (no diagnostic, no panic). Iteration order is preserved, so the result
-/// is deterministic regardless of `HashSet`'s random seed.
-pub(super) fn dedup_events_by_topic(events: Vec<EventInfo>) -> Vec<EventInfo> {
-    let mut seen = HashSet::new();
-    events
-        .into_iter()
-        .filter(|e| seen.insert(e.topic.clone()))
-        .collect()
-}
-
-/// Extract topic string from the first argument of `abi::emit()`.
-///
-/// Handles both string literals and const path expressions.
-/// Detects when a lowercase single-segment path (likely a variable) is used as
-/// a topic, since the macro can only capture the variable name, not its value.
-pub(super) fn topic_from_expr(expr: &Expr) -> Option<String> {
-    match expr {
-        // String literal: "topic_name"
-        Expr::Lit(ExprLit {
-            lit: Lit::Str(s), ..
-        }) => Some(s.value()),
-        // Path expression: Type::TOPIC or module::Type::TOPIC or variable
-        Expr::Path(path) => {
-            let segments: Vec<_> = path
-                .path
-                .segments
-                .iter()
-                .map(|s| s.ident.to_string())
-                .collect();
-
-            // Single lowercase identifier is likely a variable, not a const.
-            // e.g., `let topic = "foo"; abi::emit(topic, data);` — we can only
-            // capture "topic" as the schema topic, not its runtime value.
-            if segments.len() == 1 {
-                let first_char = segments[0].chars().next();
-                if first_char.is_some_and(char::is_lowercase) {
-                    emit_variable_topic_warning(&segments[0]);
-                }
-            }
-
-            Some(segments.join("::"))
-        }
-        _ => None,
-    }
-}
-
-/// Emit a warning when a variable is used as an event topic.
-///
-/// Currently a no-op: `proc_macro::Diagnostic` requires nightly
-/// (`proc_macro_diagnostic`). The detection logic in `topic_from_expr`
-/// still identifies variable topics and unit tests verify the behaviour;
-/// the warning can be enabled once the feature stabilises.
-fn emit_variable_topic_warning(_name: &str) {}
-
 /// Attempt to extract a type from an expression.
-/// This handles common patterns like `Type { .. }`, `Type()`, `Type::new()`.
+///
+/// Handles the inline-construction shapes `Type { .. }`, `Type()`, and the
+/// bare path `Type`. Constructor calls like `Type::new()` yield the path
+/// `Type::new`, whose lowercase last segment makes [`is_checkable_type`] skip
+/// it — an accepted false negative, since the type can't be read off the call.
 pub(super) fn type_from_expr(expr: &Expr) -> TokenStream2 {
     match expr {
         // Handle struct instantiation: events::PauseToggled { ... } or PauseToggled { ... }
@@ -239,28 +303,13 @@ pub(super) fn type_from_expr(expr: &Expr) -> TokenStream2 {
     }
 }
 
-/// Extract all `abi::emit()` calls from an impl block.
-///
-/// Events are deduplicated by topic, keeping only the first occurrence.
-pub(super) fn emit_calls(impl_block: &ItemImpl) -> Vec<EventInfo> {
-    let mut visitor = EmitVisitor::new();
-    visitor.visit_item_impl(impl_block);
-
-    dedup_events_by_topic(visitor.events)
-}
-
-/// Check if a method body contains any `abi::emit()` call.
-pub(super) fn method_has_emit_call(method: &ImplItemFn) -> bool {
-    let mut visitor = EmitVisitor::new();
-    visitor.visit_block(&method.block);
-    !visitor.events.is_empty()
-}
-
 #[cfg(test)]
 mod tests {
+    use syn::parse_quote;
+
     use super::*;
 
-    fn normalize_tokens(tokens: TokenStream2) -> String {
+    fn normalize_tokens(tokens: &TokenStream2) -> String {
         tokens
             .to_string()
             .split_whitespace()
@@ -269,351 +318,224 @@ mod tests {
     }
 
     // =========================================================================
-    // EmitVisitor tests
+    // module_events parser
     // =========================================================================
 
     #[test]
-    fn test_emit_visitor_finds_emit_call() {
-        let impl_block: ItemImpl = syn::parse_quote! {
+    fn test_module_events_empty_attr() {
+        let paths = module_events(TokenStream2::new()).unwrap();
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_module_events_single() {
+        let attr = quote! { events = [events::CounterReset] };
+        let paths = module_events(attr).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(
+            normalize_tokens(&quote!(#(#paths)*)),
+            "events :: CounterReset"
+        );
+    }
+
+    #[test]
+    fn test_module_events_multiple_with_trailing_comma() {
+        let attr = quote! { events = [A, b::C, d::e::F,] };
+        let paths = module_events(attr).unwrap();
+        assert_eq!(paths.len(), 3);
+    }
+
+    #[test]
+    fn test_module_events_unknown_keyword() {
+        let attr = quote! { emits = [A] };
+        let Err(err) = module_events(attr) else {
+            panic!("expected error for unknown keyword");
+        };
+        assert!(err.to_string().contains("unknown contract directive"));
+    }
+
+    #[test]
+    fn test_module_events_missing_brackets() {
+        let attr = quote! { events = A };
+        assert!(module_events(attr).is_err());
+    }
+
+    #[test]
+    fn test_module_events_duplicate_path_rejected() {
+        let attr = quote! { events = [events::Foo, events::Foo] };
+        let Err(err) = module_events(attr) else {
+            panic!("expected error for duplicate registered event");
+        };
+        assert!(err.to_string().contains("registered more than once"));
+    }
+
+    // =========================================================================
+    // validate_emitted_types
+    // =========================================================================
+
+    #[test]
+    fn test_validate_emitted_types_registered_passes() {
+        let impl_block: ItemImpl = parse_quote! {
             impl MyContract {
                 pub fn pause(&mut self) {
-                    self.is_paused = true;
-                    abi::emit("paused", PauseEvent {});
+                    abi::emit(events::Paused::TOPIC, events::Paused {});
                 }
             }
         };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 1);
-        assert_eq!(visitor.events[0].topic, "paused");
+        let registered = registered_keys(&[parse_quote!(events::Paused)], &[]);
+        assert!(validate_emitted_types(&impl_block, &registered, &[]).is_ok());
     }
 
     #[test]
-    fn test_emit_visitor_finds_const_topic() {
-        let impl_block: ItemImpl = syn::parse_quote! {
+    fn test_validate_emitted_types_unregistered_fails_with_span() {
+        let impl_block: ItemImpl = parse_quote! {
             impl MyContract {
                 pub fn pause(&mut self) {
-                    abi::emit(events::PauseToggled::PAUSED, events::PauseToggled());
+                    abi::emit("paused", Unregistered {});
                 }
             }
         };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 1);
-        assert_eq!(visitor.events[0].topic, "events::PauseToggled::PAUSED");
+        let registered = registered_keys(&[parse_quote!(events::Paused)], &[]);
+        let err = validate_emitted_types(&impl_block, &registered, &[]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Unregistered"), "got: {msg}");
+        assert!(msg.contains("not registered"), "got: {msg}");
     }
 
     #[test]
-    fn test_emit_visitor_multiple_emits() {
-        let impl_block: ItemImpl = syn::parse_quote! {
+    fn test_validate_emitted_types_unit_struct_call() {
+        let impl_block: ItemImpl = parse_quote! {
             impl MyContract {
-                pub fn transfer(&mut self) {
-                    abi::emit("started", StartEvent {});
-                    // do work
-                    abi::emit("completed", CompleteEvent {});
+                pub fn reset(&mut self) {
+                    abi::emit(events::Reset::TOPIC, events::Reset());
                 }
             }
         };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 2);
+        let registered = registered_keys(&[parse_quote!(events::Reset)], &[]);
+        assert!(validate_emitted_types(&impl_block, &registered, &[]).is_ok());
     }
 
     #[test]
-    fn test_emit_visitor_nested_in_if() {
-        let impl_block: ItemImpl = syn::parse_quote! {
+    fn test_validate_emitted_types_nested_in_branch() {
+        let impl_block: ItemImpl = parse_quote! {
             impl MyContract {
-                pub fn maybe_emit(&mut self, condition: bool) {
-                    if condition {
-                        abi::emit("conditional", Event {});
+                pub fn maybe(&mut self, cond: bool) {
+                    if cond {
+                        abi::emit("t", Bad {});
                     }
                 }
             }
         };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 1);
-        assert_eq!(visitor.events[0].topic, "conditional");
+        let registered = registered_keys(&[parse_quote!(Good)], &[]);
+        assert!(validate_emitted_types(&impl_block, &registered, &[]).is_err());
     }
 
     #[test]
-    fn test_emit_visitor_nested_in_loop() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn emit_many(&mut self, items: Vec<u32>) {
-                    for item in items {
-                        abi::emit("item_processed", ItemEvent { value: item });
-                    }
-                }
-            }
-        };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 1);
-    }
-
-    #[test]
-    fn test_emit_visitor_just_emit_without_abi_prefix() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn do_something(&mut self) {
-                    emit("event", SomeEvent {});
-                }
-            }
-        };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 1);
-        assert_eq!(visitor.events[0].topic, "event");
-    }
-
-    #[test]
-    fn test_emit_visitor_no_emit_calls() {
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn get_value(&self) -> u64 {
-                    self.value
-                }
-            }
-        };
-
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
-
-        assert_eq!(visitor.events.len(), 0);
-    }
-
-    #[test]
-    fn test_emit_visitor_across_multiple_methods() {
-        let impl_block: ItemImpl = syn::parse_quote! {
+    fn test_validate_emitted_types_skips_local_binding() {
+        // Constructing the event in a local before emitting is a common
+        // pattern; the data arg is then a bare lowercase ident the validator
+        // can't resolve to a type, so it is skipped rather than rejected.
+        let impl_block: ItemImpl = parse_quote! {
             impl MyContract {
                 pub fn pause(&mut self) {
-                    abi::emit("paused", PauseEvent {});
-                }
-                pub fn unpause(&mut self) {
-                    abi::emit("unpaused", UnpauseEvent {});
+                    let event = events::Paused {};
+                    abi::emit(events::Paused::TOPIC, event);
                 }
             }
         };
+        // Nothing registered — must still pass, since the local is skipped.
+        let registered = registered_keys(&[], &[]);
+        assert!(validate_emitted_types(&impl_block, &registered, &[]).is_ok());
+    }
 
-        let mut visitor = EmitVisitor::new();
-        visitor.visit_item_impl(&impl_block);
+    #[test]
+    fn test_validate_emitted_types_skips_field_access() {
+        let impl_block: ItemImpl = parse_quote! {
+            impl MyContract {
+                pub fn pause(&mut self) {
+                    abi::emit(events::Paused::TOPIC, self.pending_event);
+                }
+            }
+        };
+        let registered = registered_keys(&[], &[]);
+        assert!(validate_emitted_types(&impl_block, &registered, &[]).is_ok());
+    }
 
-        assert_eq!(visitor.events.len(), 2);
+    #[test]
+    fn test_validate_emitted_types_skips_function_result() {
+        // A free-function call resolves to a lowercase callee path, not a
+        // type, so it is skipped.
+        let impl_block: ItemImpl = parse_quote! {
+            impl MyContract {
+                pub fn pause(&mut self) {
+                    abi::emit(events::Paused::TOPIC, build_event());
+                }
+            }
+        };
+        let registered = registered_keys(&[], &[]);
+        assert!(validate_emitted_types(&impl_block, &registered, &[]).is_ok());
+    }
+
+    #[test]
+    fn test_validate_emitted_types_qualified_and_short_form_unify() {
+        // Register the qualified path while emitting the imported short form.
+        // Resolving both sides through the shared import makes them match, so
+        // valid code is not falsely rejected.
+        let imports = vec![ImportInfo {
+            name: "events".to_string(),
+            path: "crate::events".to_string(),
+        }];
+        let registered = registered_keys(&[parse_quote!(events::Paused)], &imports);
+
+        let impl_block: ItemImpl = parse_quote! {
+            impl MyContract {
+                pub fn pause(&mut self) {
+                    abi::emit("paused", events::Paused {});
+                }
+            }
+        };
+        assert!(validate_emitted_types(&impl_block, &registered, &imports).is_ok());
+    }
+
+    #[test]
+    fn test_validate_emitted_types_same_type_multiple_topics() {
+        // One struct emitted under two topics — still a single registered type.
+        let impl_block: ItemImpl = parse_quote! {
+            impl MyContract {
+                pub fn add(&mut self, item: Item) {
+                    abi::emit(Item::ADDED, Item { ..item });
+                }
+                pub fn remove(&mut self, item: Item) {
+                    abi::emit(Item::REMOVED, Item { ..item });
+                }
+            }
+        };
+        let registered = registered_keys(&[parse_quote!(Item)], &[]);
+        assert!(validate_emitted_types(&impl_block, &registered, &[]).is_ok());
     }
 
     // =========================================================================
-    // dedup_events_by_topic tests
-    //
-    // Pin the cross-source first-wins filter that the `contract` macro
-    // applies after gathering events from `emit_calls`,
-    // `inherent_method_emits`, and `trait_method_emits`. The same helper
-    // is also reused inside `emit_calls` itself.
+    // type_from_expr
     // =========================================================================
 
     #[test]
-    fn test_dedup_events_by_topic_collision_keeps_first() {
-        // Two events sharing a topic but registering structurally different
-        // data types. The first-seen survives; the second is dropped silently
-        // (no diagnostic, no panic).
-        let events = vec![
-            EventInfo {
-                topic: "shared_topic".to_string(),
-                data_type: quote! { FirstEvent },
-            },
-            EventInfo {
-                topic: "shared_topic".to_string(),
-                data_type: quote! { SecondEvent },
-            },
-        ];
+    fn test_type_from_expr_struct() {
+        let expr: Expr = parse_quote!(events::Paused { value: 1 });
+        assert_eq!(normalize_tokens(&type_from_expr(&expr)), "events :: Paused");
+    }
 
-        let deduped = dedup_events_by_topic(events);
+    #[test]
+    fn test_type_from_expr_unit_call() {
+        let expr: Expr = parse_quote!(Reset());
+        assert_eq!(normalize_tokens(&type_from_expr(&expr)), "Reset");
+    }
 
+    #[test]
+    fn test_type_from_expr_path() {
+        let expr: Expr = parse_quote!(events::Singleton);
         assert_eq!(
-            deduped.len(),
-            1,
-            "exactly one event survives a topic collision"
+            normalize_tokens(&type_from_expr(&expr)),
+            "events :: Singleton"
         );
-        assert_eq!(deduped[0].topic, "shared_topic");
-        assert_eq!(
-            deduped[0].data_type.to_string(),
-            "FirstEvent",
-            "first-seen data type wins; the colliding entry is dropped silently"
-        );
-    }
-
-    #[test]
-    fn test_dedup_events_by_topic_no_overreach_for_distinct_topics() {
-        // Same data type registered under two distinct topics: dedup must not
-        // collapse them — only topics, not data types, drive the filter.
-        let events = vec![
-            EventInfo {
-                topic: "topic_a".to_string(),
-                data_type: quote! { SharedEvent },
-            },
-            EventInfo {
-                topic: "topic_b".to_string(),
-                data_type: quote! { SharedEvent },
-            },
-        ];
-
-        let deduped = dedup_events_by_topic(events);
-
-        assert_eq!(
-            deduped.len(),
-            2,
-            "distinct topics survive even when data types match"
-        );
-        assert_eq!(deduped[0].topic, "topic_a");
-        assert_eq!(deduped[1].topic, "topic_b");
-    }
-
-    #[test]
-    fn test_dedup_events_by_topic_via_extract_pipeline() {
-        // End-to-end through the extract layer: build an impl block where two
-        // public methods carry `#[contract(emits = [...])]` attributes that
-        // share a topic but supply different data types. The macro pipeline
-        // (public_methods → dedup_events_by_topic) keeps the first occurrence
-        // and drops the rest.
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                #[contract(emits = [(SHARED::TOPIC, FirstEvent)])]
-                pub fn first(&mut self) {}
-
-                #[contract(emits = [(SHARED::TOPIC, SecondEvent)])]
-                pub fn second(&mut self) {}
-            }
-        };
-
-        let (_methods, collected) = super::super::functions::public_methods(&impl_block).unwrap();
-        assert_eq!(
-            collected.len(),
-            2,
-            "extract layer surfaces both events before dedup"
-        );
-
-        let deduped = dedup_events_by_topic(collected);
-        assert_eq!(deduped.len(), 1, "cross-source dedup keeps a single event");
-        assert_eq!(deduped[0].topic, "SHARED::TOPIC");
-        assert_eq!(
-            deduped[0].data_type.to_string(),
-            "FirstEvent",
-            "first method's registration wins"
-        );
-    }
-
-    // ========================================================================
-    // topic_from_expr tests
-    // ========================================================================
-
-    #[test]
-    fn test_topic_from_expr_string_literal() {
-        let expr: Expr = syn::parse_quote!("my_topic");
-        assert_eq!(topic_from_expr(&expr), Some("my_topic".to_string()));
-    }
-
-    #[test]
-    fn test_topic_from_expr_const_path() {
-        let expr: Expr = syn::parse_quote!(MyEvent::TOPIC);
-        assert_eq!(topic_from_expr(&expr), Some("MyEvent::TOPIC".to_string()));
-    }
-
-    #[test]
-    fn test_topic_from_expr_module_path() {
-        let expr: Expr = syn::parse_quote!(events::MyEvent::TOPIC);
-        assert_eq!(
-            topic_from_expr(&expr),
-            Some("events::MyEvent::TOPIC".to_string())
-        );
-    }
-
-    #[test]
-    fn test_topic_from_expr_variable() {
-        // Variable returns the variable name (warning emitted separately)
-        let expr: Expr = syn::parse_quote!(topic);
-        assert_eq!(topic_from_expr(&expr), Some("topic".to_string()));
-    }
-
-    #[test]
-    fn test_topic_from_expr_uppercase_single_ident() {
-        // Single uppercase ident is likely a const, not a variable
-        let expr: Expr = syn::parse_quote!(TOPIC);
-        assert_eq!(topic_from_expr(&expr), Some("TOPIC".to_string()));
-    }
-
-    #[test]
-    fn test_topic_from_expr_non_path_returns_none() {
-        // Non-path expressions return None
-        let expr: Expr = syn::parse_quote!(some_fn());
-        assert_eq!(topic_from_expr(&expr), None);
-    }
-
-    // ========================================================================
-    // emit_calls topic-collision dedup
-    // ========================================================================
-
-    #[test]
-    fn test_emit_calls_dedups_topic_collision_keeps_first() {
-        // Two `abi::emit` calls share a topic but supply different data types.
-        // The dedup inside `emit_calls` keeps the first occurrence and drops
-        // the second silently — no diagnostic, no panic.
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn first(&mut self) {
-                    abi::emit("shared", FirstEvent {});
-                }
-                pub fn second(&mut self) {
-                    abi::emit("shared", SecondEvent {});
-                }
-            }
-        };
-
-        let events = emit_calls(&impl_block);
-
-        assert_eq!(
-            events.len(),
-            1,
-            "exactly one event survives the topic collision"
-        );
-        assert_eq!(events[0].topic, "shared");
-        assert_eq!(
-            normalize_tokens(events[0].data_type.clone()),
-            "FirstEvent",
-            "first-seen data type wins; the colliding entry is dropped silently"
-        );
-    }
-
-    #[test]
-    fn test_emit_calls_preserves_distinct_topics_with_same_data_type() {
-        // Same data type emitted under two distinct topics must NOT collapse —
-        // dedup is keyed on topic only, never on data type.
-        let impl_block: ItemImpl = syn::parse_quote! {
-            impl MyContract {
-                pub fn alpha(&mut self) {
-                    abi::emit("topic_a", SharedEvent {});
-                }
-                pub fn beta(&mut self) {
-                    abi::emit("topic_b", SharedEvent {});
-                }
-            }
-        };
-
-        let events = emit_calls(&impl_block);
-
-        assert_eq!(events.len(), 2, "distinct topics are not collapsed");
-        let topics: Vec<_> = events.iter().map(|e| e.topic.as_str()).collect();
-        assert_eq!(topics, vec!["topic_a", "topic_b"]);
     }
 }

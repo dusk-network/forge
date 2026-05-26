@@ -1,0 +1,5 @@
+error: event type `events :: Foo` is registered more than once
+ --> tests/compile-fail/events/duplicate_registered_event.rs:9:35
+  |
+9 | #[contract(events = [events::Foo, events::Foo])]
+  |                                   ^^^^^^^^^^^

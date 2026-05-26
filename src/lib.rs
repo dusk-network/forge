@@ -19,3 +19,30 @@ pub mod schema;
 
 /// Re-export the contract proc macro.
 pub use dusk_forge_contract::contract;
+
+/// Declares the topics under which an event type is emitted.
+///
+/// Event authors implement this trait once per event struct, then list the
+/// types in the `#[contract(events = [...])]` module attribute. The macro
+/// reads [`TOPICS`](ContractEvent::TOPICS) at compile time to populate the
+/// contract schema and to dispatch `decode_event` in the data driver.
+///
+/// A single struct may carry multiple topics — the topic conveys the
+/// operation while the struct carries the data — so `TOPICS` is a slice.
+///
+/// # Example
+///
+/// ```
+/// use dusk_forge::ContractEvent;
+///
+/// struct OwnershipTransferred;
+///
+/// impl ContractEvent for OwnershipTransferred {
+///     const TOPICS: &'static [&'static str] =
+///         &["ownership_transferred", "ownership_renounced"];
+/// }
+/// ```
+pub trait ContractEvent {
+    /// The topics under which this event type is emitted.
+    const TOPICS: &'static [&'static str];
+}

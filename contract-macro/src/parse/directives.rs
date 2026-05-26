@@ -7,34 +7,27 @@
 //! Parser for the `#[contract(...)]` directive.
 //!
 //! A single typed pass over the directive list yields a [`ContractDirectives`]
-//! struct with one field per supported keyword (`feeds`, `expose`, `emits`,
-//! `no_event`). Shape mismatches surface as span-anchored `syn::Error`s.
+//! struct with one field per supported keyword (`feeds`, `expose`). Shape
+//! mismatches surface as span-anchored `syn::Error`s.
 
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{
-    Attribute, Error as SynError, Ident, LitStr, Path, Token, Type, bracketed, parenthesized,
-    parse_str, parse2, token,
+    Attribute, Error as SynError, Ident, LitStr, Token, Type, bracketed, parse_str, parse2, token,
 };
-
-use super::model::EventInfo;
 
 /// Parsed `#[contract(...)]` directives, aggregated across every contract
 /// attribute on a given item.
 ///
-/// Fields default to `None` / `false` when the directive is absent.
+/// Fields default to `None` when the directive is absent.
 #[derive(Default)]
 pub(crate) struct ContractDirectives {
     /// Type tokens parsed from `feeds = "<TypeName>"`.
     pub feeds: Option<TokenStream2>,
     /// Method names from `expose = [m1, m2, ...]`.
     pub expose: Option<Vec<String>>,
-    /// Event metadata from `emits = [(topic, EventType), ...]`.
-    pub emits: Option<Vec<EventInfo>>,
-    /// Set when `no_event` appears.
-    pub no_event: bool,
 }
 
 /// Parse all `#[contract(...)]` attributes on an item into a single typed
@@ -69,14 +62,6 @@ fn apply_directive(out: &mut ContractDirectives, item: DirectiveItem) -> Result<
     match kind {
         DirectiveKind::Feeds(ts) => set_once(&mut out.feeds, ts, &keyword),
         DirectiveKind::Expose(names) => set_once(&mut out.expose, names, &keyword),
-        DirectiveKind::Emits(events) => set_once(&mut out.emits, events, &keyword),
-        DirectiveKind::NoEvent => {
-            if out.no_event {
-                return Err(duplicate_directive(&keyword));
-            }
-            out.no_event = true;
-            Ok(())
-        }
     }
 }
 
@@ -106,8 +91,8 @@ impl Parse for DirectiveList {
 }
 
 struct DirectiveItem {
-    /// The keyword identifier (`feeds`, `expose`, `emits`, `no_event`) — kept
-    /// so duplicate-directive errors can span at the offending occurrence.
+    /// The keyword identifier (`feeds`, `expose`) — kept so duplicate-directive
+    /// errors can span at the offending occurrence.
     keyword: Ident,
     kind: DirectiveKind,
 }
@@ -115,8 +100,6 @@ struct DirectiveItem {
 enum DirectiveKind {
     Feeds(TokenStream2),
     Expose(Vec<String>),
-    Emits(Vec<EventInfo>),
-    NoEvent,
 }
 
 impl Parse for DirectiveItem {
@@ -124,10 +107,8 @@ impl Parse for DirectiveItem {
         let keyword: Ident = input.parse()?;
         let name = keyword.to_string();
         let kind = match name.as_str() {
-            "no_event" => DirectiveKind::NoEvent,
             "feeds" => DirectiveKind::Feeds(parse_feeds(input, &keyword)?),
             "expose" => DirectiveKind::Expose(parse_expose(input, &keyword)?),
-            "emits" => DirectiveKind::Emits(parse_emits(input, &keyword)?),
             unknown => {
                 return Err(SynError::new(
                     keyword.span(),
@@ -177,71 +158,15 @@ fn parse_expose(input: ParseStream, kw: &Ident) -> Result<Vec<String>, SynError>
     Ok(names)
 }
 
-fn parse_emits(input: ParseStream, kw: &Ident) -> Result<Vec<EventInfo>, SynError> {
-    let expected = "expected `emits = [(topic, EventType), ...]`";
-    input
-        .parse::<Token![=]>()
-        .map_err(|_| SynError::new(kw.span(), expected))?;
-    if !input.peek(token::Bracket) {
-        return Err(SynError::new(input.span(), expected));
-    }
-    let content;
-    bracketed!(content in input);
-    let tuples = Punctuated::<EventTuple, Token![,]>::parse_terminated(&content)?;
-    Ok(tuples
-        .into_iter()
-        .map(|t| EventInfo {
-            topic: t.topic,
-            data_type: t.data_type,
-        })
-        .collect())
-}
-
-struct EventTuple {
-    topic: String,
-    data_type: TokenStream2,
-}
-
-impl Parse for EventTuple {
-    fn parse(input: ParseStream) -> Result<Self, SynError> {
-        let content;
-        parenthesized!(content in input);
-        let topic = if content.peek(LitStr) {
-            let lit: LitStr = content.parse()?;
-            lit.value()
-        } else {
-            let path: Path = content.parse()?;
-            path.segments
-                .iter()
-                .map(|s| s.ident.to_string())
-                .collect::<Vec<_>>()
-                .join("::")
-        };
-        content.parse::<Token![,]>()?;
-        let ty: Type = content.parse()?;
-        if !content.is_empty() {
-            return Err(content.error("expected `(topic, EventType)`"));
-        }
-        Ok(Self {
-            topic,
-            data_type: quote! { #ty },
-        })
-    }
-}
-
 fn unknown_directive_msg(unknown: &str) -> String {
     let suggestion = match unknown {
-        "emit" => Some("emits"),
-        "no_events" => Some("no_event"),
         "exposes" => Some("expose"),
         "feed" => Some("feeds"),
         _ => None,
     };
     match suggestion {
         Some(s) => format!("unknown contract directive `{unknown}`; did you mean `{s}`?"),
-        None => format!(
-            "unknown contract directive `{unknown}`; expected one of: feeds, expose, emits, no_event"
-        ),
+        None => format!("unknown contract directive `{unknown}`; expected one of: feeds, expose"),
     }
 }
 
@@ -274,8 +199,6 @@ mod tests {
         let d = parse_impl(&impl_block).unwrap();
         assert!(d.feeds.is_none());
         assert!(d.expose.is_none());
-        assert!(d.emits.is_none());
-        assert!(!d.no_event);
     }
 
     #[test]
@@ -289,8 +212,6 @@ mod tests {
         let d = parse_method(&method).unwrap();
         assert!(d.feeds.is_none());
         assert!(d.expose.is_none());
-        assert!(d.emits.is_none());
-        assert!(!d.no_event);
     }
 
     #[test]
@@ -340,72 +261,16 @@ mod tests {
     }
 
     #[test]
-    fn parses_emits_path_topic() {
-        let method: ImplItemFn = parse_quote! {
-            #[contract(emits = [(events::OwnershipTransferred::TOPIC, events::OwnershipTransferred)])]
-            fn transfer(&mut self) {}
-        };
-        let d = parse_method(&method).unwrap();
-        let emits = d.emits.expect("emits field set");
-        assert_eq!(emits.len(), 1);
-        assert_eq!(emits[0].topic, "events::OwnershipTransferred::TOPIC");
-        assert_eq!(
-            emits[0].data_type.to_string().replace(' ', ""),
-            "events::OwnershipTransferred"
-        );
-    }
-
-    #[test]
-    fn parses_emits_string_topic() {
-        let method: ImplItemFn = parse_quote! {
-            #[contract(emits = [("custom_topic", MyEvent)])]
-            fn transfer(&mut self) {}
-        };
-        let d = parse_method(&method).unwrap();
-        let emits = d.emits.expect("emits field set");
-        assert_eq!(emits.len(), 1);
-        assert_eq!(emits[0].topic, "custom_topic");
-    }
-
-    #[test]
-    fn parses_emits_multiple() {
-        let method: ImplItemFn = parse_quote! {
-            #[contract(emits = [
-                (events::A::TOPIC, events::A),
-                ("b_topic", B),
-            ])]
-            fn act(&mut self) {}
-        };
-        let d = parse_method(&method).unwrap();
-        let emits = d.emits.unwrap();
-        assert_eq!(emits.len(), 2);
-        assert_eq!(emits[0].topic, "events::A::TOPIC");
-        assert_eq!(emits[1].topic, "b_topic");
-    }
-
-    #[test]
-    fn parses_no_event() {
-        let method: ImplItemFn = parse_quote! {
-            #[contract(no_event)]
-            fn touch(&mut self) {}
-        };
-        let d = parse_method(&method).unwrap();
-        assert!(d.no_event);
-    }
-
-    #[test]
-    fn parses_all_four_directives_in_one_attribute() {
-        // The four supported directives can all coexist inside a single
+    fn parses_feeds_and_expose_in_one_attribute() {
+        // Both supported directives can coexist inside a single
         // `#[contract(...)]` invocation.
         let impl_block: ItemImpl = parse_quote! {
-            #[contract(feeds = "Stream", expose = [m], emits = [("t", E)], no_event)]
+            #[contract(feeds = "Stream", expose = [m])]
             impl Trait for MyContract {}
         };
         let d = parse_impl(&impl_block).unwrap();
         assert!(d.feeds.is_some());
         assert_eq!(d.expose.unwrap(), vec!["m".to_string()]);
-        assert_eq!(d.emits.unwrap().len(), 1);
-        assert!(d.no_event);
     }
 
     #[test]
@@ -414,51 +279,24 @@ mod tests {
         // together into a single `ContractDirectives`.
         let impl_block: ItemImpl = parse_quote! {
             #[contract(expose = [m])]
-            #[contract(emits = [("t", E)])]
+            #[contract(feeds = "T")]
             impl Trait for MyContract {}
         };
         let d = parse_impl(&impl_block).unwrap();
         assert_eq!(d.expose.unwrap(), vec!["m".to_string()]);
-        assert_eq!(d.emits.unwrap().len(), 1);
-    }
-
-    #[test]
-    fn parses_feeds_in_any_position() {
-        // `feeds` must be recognised regardless of position within the
-        // directive list.
-        let method: ImplItemFn = parse_quote! {
-            #[contract(no_event, feeds = "T")]
-            fn act(&mut self) {}
-        };
-        let d = parse_method(&method).unwrap();
-        assert!(d.no_event);
-        assert!(d.feeds.is_some());
-    }
-
-    #[test]
-    fn feeds_value_containing_no_event_does_not_suppress() {
-        // `no_event` is only set when it appears as a directive keyword,
-        // never when the literal text "no_event" appears inside another
-        // directive's value.
-        let method: ImplItemFn = parse_quote! {
-            #[contract(feeds = "Foo_no_event")]
-            fn act(&self) {}
-        };
-        let d = parse_method(&method).unwrap();
-        assert!(!d.no_event);
         assert!(d.feeds.is_some());
     }
 
     #[test]
     fn err_unknown_directive() {
         let method: ImplItemFn = parse_quote! {
-            #[contract(no_events)]
+            #[contract(exposes)]
             fn act(&mut self) {}
         };
         let err = expect_err(parse_method(&method));
         let msg = err.to_string();
         assert!(msg.contains("unknown contract directive"), "got: {msg}");
-        assert!(msg.contains("no_events"), "got: {msg}");
+        assert!(msg.contains("exposes"), "got: {msg}");
     }
 
     #[test]
@@ -470,19 +308,17 @@ mod tests {
         let msg = expect_err(parse_method(&method)).to_string();
         assert!(msg.contains("feeds"), "got: {msg}");
         assert!(msg.contains("expose"), "got: {msg}");
-        assert!(msg.contains("emits"), "got: {msg}");
-        assert!(msg.contains("no_event"), "got: {msg}");
     }
 
     #[test]
-    fn err_unknown_directive_suggests_emits_for_emit() {
+    fn err_unknown_directive_suggests_expose_for_exposes() {
         let method: ImplItemFn = parse_quote! {
-            #[contract(emit = [("t", E)])]
+            #[contract(exposes = [m])]
             fn act(&mut self) {}
         };
         let msg = expect_err(parse_method(&method)).to_string();
         assert!(msg.contains("did you mean"), "got: {msg}");
-        assert!(msg.contains("emits"), "got: {msg}");
+        assert!(msg.contains("expose"), "got: {msg}");
     }
 
     #[test]
@@ -532,66 +368,6 @@ mod tests {
     }
 
     #[test]
-    fn err_emits_tuple_missing_comma() {
-        // Single-element tuple — the parser walks past the topic, then fails
-        // when expecting `,` before the data type.
-        let method: ImplItemFn = parse_quote! {
-            #[contract(emits = [(BadShape)])]
-            fn act(&mut self) {}
-        };
-        let msg = expect_err(parse_method(&method)).to_string();
-        assert!(
-            msg.contains(','),
-            "error should mention the missing `,`, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn err_emits_tuple_not_parenthesized() {
-        // The list contents must be tuples; a bare ident fails the
-        // `parenthesized!` step inside `EventTuple::parse`.
-        let method: ImplItemFn = parse_quote! {
-            #[contract(emits = [BadShape])]
-            fn act(&mut self) {}
-        };
-        let msg = expect_err(parse_method(&method)).to_string();
-        assert!(
-            msg.contains("parenthes"),
-            "error should mention the missing parentheses, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn err_emits_tuple_missing_data_type() {
-        // Trailing comma after the topic — the parser walks past the topic
-        // and the comma, then fails when expecting a type for `data_type`.
-        let method: ImplItemFn = parse_quote! {
-            #[contract(emits = [("topic",)])]
-            fn act(&mut self) {}
-        };
-        let msg = expect_err(parse_method(&method)).to_string();
-        assert!(
-            msg.contains("type") || msg.contains("expected"),
-            "error should describe the missing type, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn err_emits_tuple_extra_tokens() {
-        // The tuple is `(topic, EventType)` — anything trailing must be
-        // rejected, not silently dropped.
-        let method: ImplItemFn = parse_quote! {
-            #[contract(emits = [("topic", EventType, Extra)])]
-            fn act(&mut self) {}
-        };
-        let msg = expect_err(parse_method(&method)).to_string();
-        assert!(
-            msg.contains("topic, EventType"),
-            "error should describe the expected tuple shape, got: {msg}"
-        );
-    }
-
-    #[test]
     fn err_duplicate_feeds_within_one_attribute() {
         let method: ImplItemFn = parse_quote! {
             #[contract(feeds = "A", feeds = "B")]
@@ -603,27 +379,16 @@ mod tests {
     }
 
     #[test]
-    fn err_duplicate_emits_across_attributes() {
+    fn err_duplicate_expose_across_attributes() {
         // Duplicates across `#[contract(...)]` attributes must error too —
         // otherwise the first list is silently dropped.
-        let method: ImplItemFn = parse_quote! {
-            #[contract(emits = [("a", A)])]
-            #[contract(emits = [("b", B)])]
-            fn act(&mut self) {}
+        let impl_block: ItemImpl = parse_quote! {
+            #[contract(expose = [a])]
+            #[contract(expose = [b])]
+            impl Trait for MyContract {}
         };
-        let msg = expect_err(parse_method(&method)).to_string();
+        let msg = expect_err(parse_impl(&impl_block)).to_string();
         assert!(msg.contains("duplicate"), "got: {msg}");
-        assert!(msg.contains("emits"), "got: {msg}");
-    }
-
-    #[test]
-    fn err_duplicate_no_event() {
-        let method: ImplItemFn = parse_quote! {
-            #[contract(no_event, no_event)]
-            fn act(&mut self) {}
-        };
-        let msg = expect_err(parse_method(&method)).to_string();
-        assert!(msg.contains("duplicate"), "got: {msg}");
-        assert!(msg.contains("no_event"), "got: {msg}");
+        assert!(msg.contains("expose"), "got: {msg}");
     }
 }

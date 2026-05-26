@@ -12,35 +12,42 @@
 //!   …)
 //! - [`imports`]      use-tree -> [`ImportInfo`]
 //! - [`module`]       walks the user `mod {}` body
-//! - [`functions`]    impl block -> [`FunctionInfo`] + method-level
-//!   [`EventInfo`]s
-//! - [`events`]       `abi::emit()` / `abi::feed()` discovery -> [`EventInfo`]
+//! - [`functions`]    impl block -> [`FunctionInfo`]
+//! - [`events`]       `events = [...]` attribute parsing, `abi::emit()`
+//!   validation, `abi::feed()` discovery
 //! - [`directives`]   `#[contract(...)]` directive parser
 //!
 //! [`analyze`] is the orchestrator: it runs every submodule and returns a
-//! fully-extracted, deduplicated [`Analysis`] that the `generate` phase
-//! consumes. `lib.rs` only needs to call this one function.
+//! fully-extracted [`Analysis`] that the `generate` phase consumes. `lib.rs`
+//! only needs to call this one function.
 
 mod directives;
-mod events;
+pub(crate) mod events;
 mod functions;
 mod imports;
 mod model;
 mod module;
 
-use syn::{Item, ItemImpl, ItemMod};
+use quote::quote;
+use syn::{Item, ItemMod, Path};
 
 pub(crate) use self::model::{
-    Analysis, EventInfo, FunctionInfo, ImportInfo, ParameterInfo, Receiver, TraitImplInfo,
+    Analysis, EventInfo, FunctionInfo, ImportInfo, ParameterInfo, Receiver,
 };
 use crate::validate;
 
 /// Run the full parse phase against a `#[contract]` module.
 ///
-/// Walks the module body, extracts imports, functions, events and method-level
-/// emits, validates contract-level invariants, and returns an [`Analysis`]
-/// with events deduplicated by topic. Returns the first encountered error.
-pub(crate) fn analyze<'a>(module: &'a ItemMod, items: &'a [Item]) -> Result<Analysis, syn::Error> {
+/// Walks the module body, extracts imports and functions, validates
+/// contract-level invariants, and checks every in-module `abi::emit()` call
+/// against the events declared in the module attribute. Returns an
+/// [`Analysis`] whose events are the registered list verbatim. Returns the
+/// first encountered error.
+pub(crate) fn analyze<'a>(
+    module: &'a ItemMod,
+    items: &'a [Item],
+    registered_events: &[Path],
+) -> Result<Analysis, syn::Error> {
     let imports = module::imports(items)?;
     let struct_ = module::contract_struct(module, items)?;
     let contract_name = struct_.ident.to_string();
@@ -62,22 +69,30 @@ pub(crate) fn analyze<'a>(module: &'a ItemMod, items: &'a [Item]) -> Result<Anal
 
     let trait_impls = module::trait_impls(items, &contract_name)?;
 
-    let mut functions = Vec::new();
-    let mut events = Vec::new();
-
+    // Validate that every in-module emit references a registered event type.
+    // Both sides are resolved through the module imports before comparison.
+    let registered_keys = events::registered_keys(registered_events, &imports);
     for impl_block in &impl_blocks {
-        let (block_functions, block_events) = extract_inherent_impl(impl_block)?;
-        functions.extend(block_functions);
-        events.extend(block_events);
+        events::validate_emitted_types(impl_block, &registered_keys, &imports)?;
     }
-
     for trait_impl in &trait_impls {
-        let (trait_functions, trait_events) = extract_trait_impl(trait_impl)?;
-        functions.extend(trait_functions);
-        events.extend(trait_events);
+        events::validate_emitted_types(trait_impl.impl_block, &registered_keys, &imports)?;
     }
 
-    let events = events::dedup_events_by_topic(events);
+    let mut functions = Vec::new();
+    for impl_block in &impl_blocks {
+        functions.extend(functions::public_methods(impl_block)?);
+    }
+    for trait_impl in &trait_impls {
+        functions.extend(functions::trait_methods(trait_impl)?);
+    }
+
+    let events = registered_events
+        .iter()
+        .map(|path| EventInfo {
+            data_type: quote! { #path },
+        })
+        .collect();
 
     Ok(Analysis {
         contract_ident: struct_.ident.clone(),
@@ -86,34 +101,6 @@ pub(crate) fn analyze<'a>(module: &'a ItemMod, items: &'a [Item]) -> Result<Anal
         functions,
         events,
     })
-}
-
-/// Extract functions and events from a single inherent impl block.
-///
-/// Merges the two sources of events: `abi::emit()` calls in method bodies
-/// (discovered by `events::emit_calls`) and `#[contract(emits = [...])]`
-/// attributes (already harvested by `functions::public_methods`). Body events
-/// come first to match the order the schema was generated in pre-refactor.
-fn extract_inherent_impl(
-    impl_block: &ItemImpl,
-) -> Result<(Vec<FunctionInfo>, Vec<EventInfo>), syn::Error> {
-    let (block_functions, method_events) = functions::public_methods(impl_block)?;
-    let mut block_events = events::emit_calls(impl_block);
-    block_events.extend(method_events);
-    Ok((block_functions, block_events))
-}
-
-/// Extract functions and events from a single trait impl block.
-///
-/// Mirrors [`extract_inherent_impl`] but routes through `trait_methods`,
-/// which respects the `#[contract(expose = [...])]` filter.
-fn extract_trait_impl(
-    trait_impl: &TraitImplInfo,
-) -> Result<(Vec<FunctionInfo>, Vec<EventInfo>), syn::Error> {
-    let (trait_functions, method_events) = functions::trait_methods(trait_impl)?;
-    let mut trait_events = events::emit_calls(trait_impl.impl_block);
-    trait_events.extend(method_events);
-    Ok((trait_functions, trait_events))
 }
 
 #[cfg(test)]
@@ -131,7 +118,7 @@ mod tests {
         };
         let items = module.content.as_ref().unwrap().1.clone();
 
-        let Err(err) = analyze(&module, &items) else {
+        let Err(err) = analyze(&module, &items, &[]) else {
             panic!("expected error for missing impl block");
         };
         let msg = err.to_string();
@@ -161,7 +148,7 @@ mod tests {
         };
         let items = module.content.as_ref().unwrap().1.clone();
 
-        let Err(err) = analyze(&module, &items) else {
+        let Err(err) = analyze(&module, &items, &[]) else {
             panic!("expected error for impl on wrong type");
         };
         let msg = err.to_string();
@@ -186,7 +173,7 @@ mod tests {
         };
         let items = module.content.as_ref().unwrap().1.clone();
 
-        let Err(err) = analyze(&module, &items) else {
+        let Err(err) = analyze(&module, &items, &[]) else {
             panic!("expected error for glob import");
         };
         let msg = err.to_string();
@@ -211,7 +198,7 @@ mod tests {
         };
         let items = module.content.as_ref().unwrap().1.clone();
 
-        let Err(err) = analyze(&module, &items) else {
+        let Err(err) = analyze(&module, &items, &[]) else {
             panic!("expected error for relative import");
         };
         let msg = err.to_string();

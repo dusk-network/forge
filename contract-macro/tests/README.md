@@ -1,6 +1,6 @@
 # `dusk-forge-contract` test harness
 
-End-to-end coverage of the `#[contract]` macro. Four layers:
+End-to-end coverage of the `#[contract]` macro. Five layers:
 
 | Layer | What it pins | Driven by |
 |---|---|---|
@@ -8,6 +8,7 @@ End-to-end coverage of the `#[contract]` macro. Four layers:
 | `tests/compile-fail/` (+ `compile_fail.rs`) | Each rejection rule produces a diagnostic | trybuild |
 | `tests/compile-pass/` (+ `compile_pass.rs`) | Valid contract shapes expand and type-check | `cargo check` on a sub-crate |
 | `tests/compile-fail-both-features/` | Mutually-exclusive feature gate fires | `cargo check` (asserts failure) |
+| `tests/compile-fail-missing-event-trait/` | A registered event type missing its `ContractEvent` impl is rejected | `cargo check` (asserts failure) |
 
 `tests/test-contract/` (workspace member) exercises a single rich shape end-to-end into a WASM build. Fixtures here cover the *variations* that one reference contract does not.
 
@@ -19,7 +20,7 @@ Both `compile-fail/` and `compile-pass/src/` are nested by topic, not flat:
 |---|---|
 | `methods/` | Inherent method validation: `validate::public_method`, `validate::new_constructor`, `validate::init_method` |
 | `traits/` | Trait method validation: `validate::trait_method` |
-| `events/` | Event-emission validation: `validate::method_emits_event` |
+| `events/` | Event registration: the `#[contract(events = [...])]` attribute and `parse::events::validate_emitted_types` |
 | `directives/` | `#[contract(...)]` directive parsing |
 | `feature_gates/` | `contract` / `data-driver` cargo feature enforcement |
 
