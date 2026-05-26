@@ -1,6 +1,6 @@
 [package]
 name = "dusk-forge"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 description = "A smart contract development framework for Dusk"
@@ -30,7 +30,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 # Workspace internal dependencies
-dusk-forge-contract = { version = "0.1.1", path = "./contract-macro/" }
+dusk-forge-contract = { version = "0.2.0", path = "./contract-macro/" }
 
 dusk-core = { version = "1.6", git = "https://github.com/dusk-network/rusk", tag = "dusk-core-1.6.0" }
 bytecheck = { version = "0.6.12", default-features = false }
