@@ -1,8 +1,6 @@
 // Pins: validate::init_method::returns_value
 //
-// An `init` method that returns a non-unit type must be rejected:
-// initialisation has no caller to consume a return value, so errors must
-// panic instead.
+// A `#[contract(init)]` deploy constructor must return `()`.
 
 use dusk_forge_contract::contract;
 
@@ -15,7 +13,9 @@ mod my_contract {
             Self
         }
 
-        pub fn init(&mut self) -> bool {
+        #[contract(init)]
+        pub fn initialize(&mut self, seed: u64) -> bool {
+            let _ = seed;
             true
         }
     }

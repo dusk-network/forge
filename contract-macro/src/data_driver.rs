@@ -111,12 +111,19 @@ pub(crate) fn module(
     }
 }
 
+fn function_export_name(function: &FunctionInfo) -> String {
+    function
+        .wasm_export_name
+        .clone()
+        .unwrap_or_else(|| function.name.to_string())
+}
+
 /// Generate match arms for `encode_input_fn`.
 fn generate_encode_input_arms(functions: &[FunctionInfo], type_map: &TypeMap) -> Vec<TokenStream2> {
     functions
         .iter()
         .map(|f| {
-            let name_str = f.name.to_string();
+            let name_str = function_export_name(f);
             let input_type = resolve::resolved_tokens(&f.input_type, type_map);
             quote! {
                 #name_str => dusk_data_driver::json_to_rkyv::<#input_type>(json)
@@ -130,7 +137,7 @@ fn generate_decode_input_arms(functions: &[FunctionInfo], type_map: &TypeMap) ->
     functions
         .iter()
         .map(|f| {
-            let name_str = f.name.to_string();
+            let name_str = function_export_name(f);
             let input_type = resolve::resolved_tokens(&f.input_type, type_map);
             quote! {
                 #name_str => dusk_data_driver::rkyv_to_json::<#input_type>(rkyv)
@@ -151,7 +158,7 @@ fn generate_decode_output_arms(
     functions
         .iter()
         .map(|f| {
-            let name_str = f.name.to_string();
+            let name_str = function_export_name(f);
 
             // Use feed_type if present, otherwise use output_type
             let (decode_type, type_str) = if let Some(feed_type) = &f.feed_type {
@@ -235,6 +242,7 @@ mod tests {
             receiver: Receiver::Ref,
             trait_name: None,
             feed_type: None,
+            wasm_export_name: None,
         }
     }
 
@@ -513,6 +521,7 @@ mod tests {
             receiver: Receiver::Ref,
             trait_name: None,
             feed_type: Some(feed),
+            wasm_export_name: None,
         }
     }
 

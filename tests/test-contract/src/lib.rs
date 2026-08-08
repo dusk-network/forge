@@ -79,11 +79,12 @@ mod test_contract {
             }
         }
 
-        /// Initializes the contract with an owner.
+        /// Deploy constructor: marks this method as the WASM `init` export.
         ///
         /// This method intentionally doesn't emit an event as it's only called
         /// during contract deployment.
-        pub fn init(&mut self, owner: PublicKey) {
+        #[contract(init)]
+        pub fn initialize(&mut self, owner: PublicKey) {
             self.owner = Some(owner);
         }
 

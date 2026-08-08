@@ -1,8 +1,6 @@
-// Pins: validate::init_method::no_params_ok
+// Pins: validate::init_method::valid_no_params
 //
-// An `init` method declared as `&mut self` with no additional parameters
-// must compile. `tests/test-contract/` exercises `init(&mut self, owner)`;
-// this fixture pins the parameter-less variant.
+// A deploy constructor marked with `#[contract(init)]` may take only `&mut self`.
 
 #[dusk_forge::contract]
 pub mod my_contract {
@@ -15,7 +13,8 @@ pub mod my_contract {
             Self { initialized: false }
         }
 
-        pub fn init(&mut self) {
+        #[contract(init)]
+        pub fn initialize(&mut self) {
             self.initialized = true;
         }
     }

@@ -1,7 +1,6 @@
-// Pins: validate::init_method::immutable_self
+// Pins: validate::init_method::duplicate_deploy_constructor
 //
-// A `#[contract(init)]` deploy constructor with an immutable `&self` receiver
-// must be rejected.
+// Only one method may carry `#[contract(init)]` per contract.
 
 use dusk_forge_contract::contract;
 
@@ -15,7 +14,10 @@ mod my_contract {
         }
 
         #[contract(init)]
-        pub fn initialize(&self) {}
+        pub fn setup_a(&mut self) {}
+
+        #[contract(init)]
+        pub fn setup_b(&mut self) {}
     }
 }
 

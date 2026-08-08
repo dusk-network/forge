@@ -129,7 +129,10 @@ pub(crate) fn schema(
     let function_entries: Vec<_> = functions
         .iter()
         .map(|f| {
-            let name_str = f.name.to_string();
+            let name_str = f
+                .wasm_export_name
+                .clone()
+                .unwrap_or_else(|| f.name.to_string());
             let doc = f.doc.as_deref().unwrap_or("");
             let input = &f.input_type;
             let output = &f.output_type;
@@ -211,6 +214,11 @@ pub(crate) fn extern_wrappers(functions: &[FunctionInfo], contract_ident: &Ident
         .iter()
         .map(|f| {
             let fn_name = &f.name;
+            let export_name = f
+                .wasm_export_name
+                .clone()
+                .unwrap_or_else(|| fn_name.to_string());
+            let export_ident = format_ident!("{}", export_name);
             let input_type = &f.input_type;
 
             // Build the closure parameter pattern and the method call arguments
@@ -285,7 +293,7 @@ pub(crate) fn extern_wrappers(functions: &[FunctionInfo], contract_ident: &Ident
 
             quote! {
                 #[unsafe(no_mangle)]
-                unsafe extern "C" fn #fn_name(arg_len: u32) -> u32 {
+                unsafe extern "C" fn #export_ident(arg_len: u32) -> u32 {
                     dusk_core::abi::wrap_call(arg_len, |#closure_param| #method_call)
                 }
             }
@@ -364,6 +372,7 @@ mod tests {
             receiver: Receiver::Ref,
             trait_name: None,
             feed_type: None,
+            wasm_export_name: None,
         }];
 
         let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));
@@ -387,7 +396,7 @@ mod tests {
     fn test_extern_wrapper_single_param() {
         let contract_ident = format_ident!("MyContract");
         let functions = vec![FunctionInfo {
-            name: format_ident!("init"),
+            name: format_ident!("initialize"),
             doc: Some("Initialize.".to_string()),
             params: vec![ParameterInfo {
                 name: format_ident!("owner"),
@@ -401,6 +410,7 @@ mod tests {
             receiver: Receiver::RefMut,
             trait_name: None,
             feed_type: None,
+            wasm_export_name: Some("init".to_string()),
         }];
 
         let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));
@@ -412,7 +422,7 @@ mod tests {
 
                 #[unsafe(no_mangle)]
                 unsafe extern "C" fn init(arg_len: u32) -> u32 {
-                    dusk_core::abi::wrap_call(arg_len, |owner: Address| STATE.init(owner))
+                    dusk_core::abi::wrap_call(arg_len, |owner: Address| STATE.initialize(owner))
                 }
             }
         });
@@ -446,6 +456,7 @@ mod tests {
             receiver: Receiver::RefMut,
             trait_name: None,
             feed_type: None,
+            wasm_export_name: None,
         }];
 
         let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));
@@ -479,6 +490,7 @@ mod tests {
                 receiver: Receiver::RefMut,
                 trait_name: None,
                 feed_type: None,
+                wasm_export_name: None,
             },
             FunctionInfo {
                 name: format_ident!("unpause"),
@@ -490,6 +502,7 @@ mod tests {
                 receiver: Receiver::RefMut,
                 trait_name: None,
                 feed_type: None,
+                wasm_export_name: None,
             },
         ];
 
@@ -528,6 +541,7 @@ mod tests {
             receiver: Receiver::Ref,
             trait_name: None,
             feed_type: None,
+            wasm_export_name: None,
         }];
 
         let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));
@@ -565,6 +579,7 @@ mod tests {
             receiver: Receiver::RefMut,
             trait_name: None,
             feed_type: None,
+            wasm_export_name: None,
         }];
 
         let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));
@@ -602,6 +617,7 @@ mod tests {
             receiver: Receiver::RefMut,
             trait_name: None,
             feed_type: None,
+            wasm_export_name: None,
         }];
 
         let output = normalize_tokens(&extern_wrappers(&functions, &contract_ident));

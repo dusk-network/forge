@@ -388,6 +388,7 @@ mod tests {
             receiver: crate::parse::Receiver::Ref,
             trait_name: None,
             feed_type: None,
+            wasm_export_name: None,
         };
 
         let type_map = build_type_map(&imports, std::slice::from_ref(&func), &[]);
