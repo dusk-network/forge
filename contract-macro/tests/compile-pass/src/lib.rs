@@ -6,5 +6,10 @@
 
 #![no_std]
 
+#[cfg(feature = "contract")]
 pub mod events;
+#[cfg(feature = "contract")]
 pub mod methods;
+
+#[cfg(feature = "data-driver")]
+pub mod data_driver;
