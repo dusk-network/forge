@@ -75,8 +75,26 @@ fn resolve_syn_type(ty: &syn::Type, import_map: &HashMap<String, String>) -> Str
                 format!("&{resolved}")
             }
         }
+        syn::Type::Array(array) => {
+            let elem = resolve_syn_type(&array.elem, import_map);
+            let len = resolve_const_expr(&array.len, import_map);
+            format!("[{elem}; {len}]")
+        }
         _ => quote::quote!(#ty).to_string(),
     }
+}
+
+/// Resolve a const expression used in array lengths or const-generic parameters.
+fn resolve_const_expr(expr: &syn::Expr, import_map: &HashMap<String, String>) -> String {
+    if let syn::Expr::Path(expr_path) = expr
+        && let Some(ident) = expr_path.path.get_ident()
+    {
+        let name = ident.to_string();
+        if let Some(resolved) = import_map.get(&name) {
+            return resolved.clone();
+        }
+    }
+    quote::quote!(#expr).to_string()
 }
 
 /// Resolve a `TypePath` to its fully qualified string form.
@@ -134,6 +152,7 @@ fn format_generic_args(args: &syn::PathArguments, import_map: &HashMap<String, S
                 .iter()
                 .map(|arg| match arg {
                     syn::GenericArgument::Type(ty) => resolve_syn_type(ty, import_map),
+                    syn::GenericArgument::Const(expr) => resolve_const_expr(expr, import_map),
                     other => quote::quote!(#other).to_string(),
                 })
                 .collect();
@@ -303,6 +322,30 @@ mod tests {
         let ty = quote! { u64 };
         let resolved = resolve_type(&ty, &import_map);
         assert_eq!(resolved, "u64");
+    }
+
+    #[test]
+    fn test_resolve_array_length_const_import() {
+        let import_map = HashMap::from([(
+            "DEPTH".to_string(),
+            "{ super::my_contract::DEPTH }".to_string(),
+        )]);
+
+        let ty = quote! { [u8; DEPTH] };
+        let resolved = resolve_type(&ty, &import_map);
+        assert_eq!(resolved, "[u8; { super::my_contract::DEPTH }]");
+    }
+
+    #[test]
+    fn test_resolve_const_generic_argument() {
+        let import_map = HashMap::from([(
+            "DEPTH".to_string(),
+            "{ super::my_contract::DEPTH }".to_string(),
+        )]);
+
+        let ty = quote! { Opening<DEPTH> };
+        let resolved = resolve_type(&ty, &import_map);
+        assert_eq!(resolved, "Opening<{ super::my_contract::DEPTH }>");
     }
 
     // =========================================================================

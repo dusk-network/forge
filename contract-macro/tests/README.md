@@ -23,6 +23,7 @@ Both `compile-fail/` and `compile-pass/src/` are nested by topic, not flat:
 | `events/` | Event registration: the `#[contract(events = [...])]` attribute and `parse::events::validate_emitted_types` |
 | `directives/` | `#[contract(...)]` directive parsing |
 | `feature_gates/` | `contract` / `data-driver` cargo feature enforcement |
+| `data_driver/` | `data-driver` codegen: `generate::contract_module` plain-data visibility, `generate::data_visible_items`, `resolve::resolve_const_expr` |
 
 Add a new topic dir only when a rule has no reasonable home in the existing ones. Topics are stable categories — they should outlive individual rule renames inside `validate.rs`.
 

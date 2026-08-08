@@ -30,7 +30,16 @@ pub(crate) fn contract_module(
         events,
     } = analysis;
 
-    let type_map = resolve::build_type_map(imports, functions, events);
+    let mod_vis = &module.vis;
+    let mod_name = &module.ident;
+    let mod_attrs = &module.attrs;
+
+    // Module-local items are not `use` imports; feed them into the type map
+    // (as `super::mod::NAME`, with `{ }` on consts) without adding schema entries.
+    let mut all_imports = imports.clone();
+    all_imports.extend(local_const_imports(items, mod_name));
+
+    let type_map = resolve::build_type_map(&all_imports, functions, events);
 
     let schema = schema(contract_name, imports, functions, events, &type_map);
     let state_static = state_static(contract_ident);
@@ -39,10 +48,7 @@ pub(crate) fn contract_module(
     let data_driver = data_driver::module(&type_map, functions, events);
 
     let stripped_items = stripped_module_items(items, contract_name);
-
-    let mod_vis = &module.vis;
-    let mod_name = &module.ident;
-    let mod_attrs = &module.attrs;
+    let data_visible_items = data_visible_items(items);
 
     quote! {
         #[cfg(not(any(feature = "contract", feature = "data-driver")))]
@@ -64,8 +70,160 @@ pub(crate) fn contract_module(
             #externs
         }
 
+        // Plain data (const/struct/enum/type + needed uses) for data-driver sibling codegen.
+        #[cfg(feature = "data-driver")]
+        #(#mod_attrs)*
+        #mod_vis mod #mod_name {
+            #(#data_visible_items)*
+        }
+
         #data_driver
     }
+}
+
+/// Module-local plain data as implicit imports for [`resolve::build_type_map`].
+/// Const paths are brace-wrapped so they splice correctly into const-generic positions.
+fn local_const_imports(items: &[Item], mod_name: &Ident) -> Vec<ImportInfo> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Const(item_const) => Some(ImportInfo {
+                name: item_const.ident.to_string(),
+                path: format!("{{ super::{mod_name}::{} }}", item_const.ident),
+            }),
+            Item::Struct(item_struct) => Some(ImportInfo {
+                name: item_struct.ident.to_string(),
+                path: format!("super::{mod_name}::{}", item_struct.ident),
+            }),
+            Item::Enum(item_enum) => Some(ImportInfo {
+                name: item_enum.ident.to_string(),
+                path: format!("super::{mod_name}::{}", item_enum.ident),
+            }),
+            Item::Type(item_type) => Some(ImportInfo {
+                name: item_type.ident.to_string(),
+                path: format!("super::{mod_name}::{}", item_type.ident),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Plain-data module items safe under `data-driver` (no impl blocks / ABI-only uses).
+fn data_visible_items(items: &[Item]) -> Vec<Item> {
+    let plain: Vec<Item> = items
+        .iter()
+        .filter(|item| {
+            matches!(
+                item,
+                Item::Const(_) | Item::Static(_) | Item::Struct(_) | Item::Enum(_) | Item::Type(_)
+            )
+        })
+        .map(data_visible_item)
+        .collect();
+
+    let referenced: std::collections::HashSet<String> = plain
+        .iter()
+        .flat_map(item_type_words)
+        .collect();
+
+    let used_imports = items.iter().filter(|item| {
+        let Item::Use(item_use) = item else {
+            return false;
+        };
+        use_leaf_names(item_use)
+            .iter()
+            .any(|name| referenced.contains(name))
+    });
+
+    plain.into_iter().chain(used_imports.cloned()).collect()
+}
+
+/// Clone a plain-data item; `const`/`static` become `pub(crate)` so sibling `data_driver` can name them.
+fn data_visible_item(item: &Item) -> Item {
+    match item {
+        Item::Const(item_const) => {
+            let mut item_const = item_const.clone();
+            item_const.vis = syn::parse_quote!(pub(crate));
+            Item::Const(item_const)
+        }
+        Item::Static(item_static) => {
+            let mut item_static = item_static.clone();
+            item_static.vis = syn::parse_quote!(pub(crate));
+            Item::Static(item_static)
+        }
+        Item::Type(item_type) => {
+            let mut item_type = item_type.clone();
+            item_type.vis = syn::parse_quote!(pub(crate));
+            Item::Type(item_type)
+        }
+        _ => item.clone(),
+    }
+}
+
+/// Type/expression identifier words in a plain-data item (not field/item names).
+fn item_type_words(item: &Item) -> Vec<String> {
+    let mut words = Vec::new();
+    match item {
+        Item::Struct(s) => {
+            for field in &s.fields {
+                let ty = &field.ty;
+                words.extend(token_words(&quote! { #ty }.to_string()));
+            }
+        }
+        Item::Enum(e) => {
+            for variant in &e.variants {
+                for field in &variant.fields {
+                    let ty = &field.ty;
+                    words.extend(token_words(&quote! { #ty }.to_string()));
+                }
+                if let Some((_, discriminant)) = &variant.discriminant {
+                    words.extend(token_words(&quote! { #discriminant }.to_string()));
+                }
+            }
+        }
+        Item::Const(c) => {
+            let (ty, expr) = (&c.ty, &c.expr);
+            words.extend(token_words(&quote! { #ty }.to_string()));
+            words.extend(token_words(&quote! { #expr }.to_string()));
+        }
+        Item::Static(s) => {
+            let (ty, expr) = (&s.ty, &s.expr);
+            words.extend(token_words(&quote! { #ty }.to_string()));
+            words.extend(token_words(&quote! { #expr }.to_string()));
+        }
+        Item::Type(t) => {
+            let ty = &t.ty;
+            words.extend(token_words(&quote! { #ty }.to_string()));
+        }
+        _ => {}
+    }
+    words
+}
+
+fn token_words(s: &str) -> std::collections::HashSet<String> {
+    s.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn use_leaf_names(item_use: &syn::ItemUse) -> Vec<String> {
+    fn walk(tree: &syn::UseTree, out: &mut Vec<String>) {
+        match tree {
+            syn::UseTree::Path(p) => walk(&p.tree, out),
+            syn::UseTree::Name(n) => out.push(n.ident.to_string()),
+            syn::UseTree::Rename(r) => out.push(r.rename.to_string()),
+            syn::UseTree::Glob(_) => {}
+            syn::UseTree::Group(g) => {
+                for i in &g.items {
+                    walk(i, out);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&item_use.tree, &mut out);
+    out
 }
 
 /// Clone the module items, replacing every inherent or trait impl block for
@@ -342,6 +500,7 @@ pub(crate) fn strip_contract_attributes(mut impl_block: ItemImpl) -> ItemImpl {
 mod tests {
     use super::*;
     use crate::parse::{ParameterInfo, Receiver};
+    use quote::ToTokens;
 
     fn normalize_tokens(tokens: &TokenStream2) -> String {
         tokens
@@ -633,5 +792,56 @@ mod tests {
         });
 
         assert_eq!(expected, output);
+    }
+
+    #[test]
+    fn test_local_const_imports_brace_wraps_const() {
+        let module: ItemMod = syn::parse_quote! {
+            mod my_contract {
+                const DEPTH: usize = 16;
+                pub struct MyContract;
+            }
+        };
+        let items = &module.content.as_ref().unwrap().1;
+        let mod_name = format_ident!("my_contract");
+        let imports = local_const_imports(items, &mod_name);
+
+        assert_eq!(imports.len(), 2);
+        assert_eq!(imports[0].name, "DEPTH");
+        assert_eq!(imports[0].path, "{ super::my_contract::DEPTH }");
+        assert_eq!(imports[1].name, "MyContract");
+        assert_eq!(imports[1].path, "super::my_contract::MyContract");
+    }
+
+    #[test]
+    fn test_data_visible_items_skips_impl_only_use() {
+        let module: ItemMod = syn::parse_quote! {
+            mod my_contract {
+                mod only_impl {
+                    pub fn helper() -> u32 {
+                        1
+                    }
+                }
+                use only_impl::helper;
+                const DEPTH: usize = 8;
+                pub struct MyContract;
+                impl MyContract {
+                    pub fn touch(&mut self) {
+                        let _ = helper();
+                    }
+                }
+            }
+        };
+        let items = &module.content.as_ref().unwrap().1;
+
+        let visible = data_visible_items(items);
+        let has_helper_use = visible.iter().any(|item| {
+            matches!(item, Item::Use(u) if u.to_token_stream().to_string().contains("helper"))
+        });
+        assert!(!has_helper_use, "impl-only use must not appear in data-visible items");
+        assert!(
+            visible.iter().any(|i| matches!(i, Item::Const(_))),
+            "const DEPTH should remain visible"
+        );
     }
 }

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep module-local `const` items visible under the `data-driver` feature so
+  const-generic parameters in public method signatures resolve during
+  data-driver codegen ([#36](https://github.com/dusk-network/forge/issues/36)).
+
 ## [0.3.0] - 2026-05-26
 
 ### Added

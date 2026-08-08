@@ -27,3 +27,23 @@ fn compile_pass_tests() {
         String::from_utf8_lossy(&output.stderr),
     );
 }
+
+#[test]
+fn compile_pass_data_driver_tests() {
+    let output = std::process::Command::new("cargo")
+        .arg("check")
+        .arg("--all-targets")
+        .arg("--no-default-features")
+        .arg("--features")
+        .arg("data-driver")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/compile-pass"))
+        .output()
+        .expect("failed to run cargo check");
+
+    assert!(
+        output.status.success(),
+        "compile-pass data-driver fixtures failed to build:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
