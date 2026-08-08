@@ -28,6 +28,8 @@ pub(crate) struct ContractDirectives {
     pub feeds: Option<TokenStream2>,
     /// Method names from `expose = [m1, m2, ...]`.
     pub expose: Option<Vec<String>>,
+    /// Marks the method as the deploy constructor (WASM export `init`).
+    pub init: bool,
 }
 
 /// Parse all `#[contract(...)]` attributes on an item into a single typed
@@ -62,7 +64,16 @@ fn apply_directive(out: &mut ContractDirectives, item: DirectiveItem) -> Result<
     match kind {
         DirectiveKind::Feeds(ts) => set_once(&mut out.feeds, ts, &keyword),
         DirectiveKind::Expose(names) => set_once(&mut out.expose, names, &keyword),
+        DirectiveKind::Init => set_init(&mut out.init, &keyword),
     }
+}
+
+fn set_init(slot: &mut bool, keyword: &Ident) -> Result<(), SynError> {
+    if *slot {
+        return Err(duplicate_directive(keyword));
+    }
+    *slot = true;
+    Ok(())
 }
 
 fn set_once<T>(slot: &mut Option<T>, value: T, keyword: &Ident) -> Result<(), SynError> {
@@ -100,6 +111,7 @@ struct DirectiveItem {
 enum DirectiveKind {
     Feeds(TokenStream2),
     Expose(Vec<String>),
+    Init,
 }
 
 impl Parse for DirectiveItem {
@@ -109,6 +121,7 @@ impl Parse for DirectiveItem {
         let kind = match name.as_str() {
             "feeds" => DirectiveKind::Feeds(parse_feeds(input, &keyword)?),
             "expose" => DirectiveKind::Expose(parse_expose(input, &keyword)?),
+            "init" => DirectiveKind::Init,
             unknown => {
                 return Err(SynError::new(
                     keyword.span(),
@@ -166,7 +179,7 @@ fn unknown_directive_msg(unknown: &str) -> String {
     };
     match suggestion {
         Some(s) => format!("unknown contract directive `{unknown}`; did you mean `{s}`?"),
-        None => format!("unknown contract directive `{unknown}`; expected one of: feeds, expose"),
+        None => format!("unknown contract directive `{unknown}`; expected one of: feeds, expose, init"),
     }
 }
 
@@ -212,6 +225,16 @@ mod tests {
         let d = parse_method(&method).unwrap();
         assert!(d.feeds.is_none());
         assert!(d.expose.is_none());
+    }
+
+    #[test]
+    fn parses_init() {
+        let method: ImplItemFn = parse_quote! {
+            #[contract(init)]
+            fn initialize(&mut self) {}
+        };
+        let d = parse_method(&method).unwrap();
+        assert!(d.init);
     }
 
     #[test]

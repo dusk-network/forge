@@ -1,0 +1,6 @@
+error: only one `#[contract(init)]` deploy constructor is allowed per contract
+  --> tests/compile-fail/methods/init_duplicate_deploy_constructor.rs:19:9
+   |
+19 | /         #[contract(init)]
+20 | |         pub fn setup_b(&mut self) {}
+   | |____________________________________^

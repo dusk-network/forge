@@ -22,6 +22,7 @@
 //! only needs to call this one function.
 
 mod directives;
+pub(crate) use directives::parse_contract_directives;
 pub(crate) mod events;
 mod functions;
 mod imports;

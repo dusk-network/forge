@@ -1,8 +1,7 @@
 // Pins: validate::init_method::no_receiver
 //
-// An `init` method declared as an associated function (no `self`) must be
-// rejected: initialisation needs access to contract state through `&mut
-// self`.
+// A `#[contract(init)]` deploy constructor declared as an associated function
+// (no `self`) must be rejected.
 
 use dusk_forge_contract::contract;
 
@@ -15,7 +14,8 @@ mod my_contract {
             Self
         }
 
-        pub fn init(seed: u64) {
+        #[contract(init)]
+        pub fn initialize(seed: u64) {
             let _ = seed;
         }
     }

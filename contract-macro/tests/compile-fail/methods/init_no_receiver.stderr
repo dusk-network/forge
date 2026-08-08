@@ -1,5 +1,5 @@
-error: `MyContract::init` must take `&mut self`; initialization requires access to contract state
+error: `MyContract::initialize` (`#[contract(init)]` deploy constructor) must take `&mut self`; initialization requires access to contract state
   --> tests/compile-fail/methods/init_no_receiver.rs:18:13
    |
-18 |         pub fn init(seed: u64) {
-   |             ^^^^^^^^^^^^^^^^^^
+18 |         pub fn initialize(seed: u64) {
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^

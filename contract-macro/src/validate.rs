@@ -8,6 +8,8 @@
 
 use syn::{FnArg, ImplItem, ImplItemFn, ItemImpl, ReturnType, Type, Visibility};
 
+use crate::parse::parse_contract_directives;
+
 /// Validate that a public method has a supported signature for extern wrapper
 /// generation.
 ///
@@ -183,35 +185,44 @@ pub(crate) fn new_constructor(
     Ok(())
 }
 
-/// Validate the `init` method if present.
+/// Validate the deploy constructor (`#[contract(init)]`) if present.
 ///
-/// The `init` method is optional but if present, it must:
-/// - Take `&mut self` (initialization modifies state)
-/// - Return `()` (errors should panic, not return)
+/// Bare inherent methods named `init` are rejected during extraction. A deploy
+/// constructor must be marked with `#[contract(init)]` on a differently named
+/// method, take `&mut self`, and return `()`.
 pub(crate) fn init_method(
     contract_name: &str,
     impl_blocks: &[&ItemImpl],
 ) -> Result<(), syn::Error> {
-    // Find the `init` method in any impl block
-    let init_method = impl_blocks.iter().find_map(|impl_block| {
-        impl_block.items.iter().find_map(|item| {
-            if let ImplItem::Fn(method) = item
-                && method.sig.ident == "init"
-            {
-                Some(method)
-            } else {
-                None
-            }
-        })
-    });
+    let mut deploy_ctor: Option<&ImplItemFn> = None;
 
-    // If no init method, that's fine - it's optional
-    let Some(init_method) = init_method else {
+    for impl_block in impl_blocks {
+        for item in &impl_block.items {
+            if let ImplItem::Fn(method) = item {
+                let directives = parse_contract_directives(&method.attrs)?;
+                if directives.init {
+                    if deploy_ctor.is_some() {
+                        return Err(syn::Error::new_spanned(
+                            method,
+                            "only one `#[contract(init)]` deploy constructor is allowed per contract",
+                        ));
+                    }
+                    deploy_ctor = Some(method);
+                }
+            }
+        }
+    }
+
+    let Some(deploy_ctor) = deploy_ctor else {
         return Ok(());
     };
 
-    // Check that it has a receiver
-    let receiver = init_method.sig.inputs.first().and_then(|arg| {
+    let method_name = deploy_ctor.sig.ident.to_string();
+    let deploy_label = format!(
+        "`{contract_name}::{method_name}` (`#[contract(init)]` deploy constructor)"
+    );
+
+    let receiver = deploy_ctor.sig.inputs.first().and_then(|arg| {
         if let FnArg::Receiver(r) = arg {
             Some(r)
         } else {
@@ -221,27 +232,25 @@ pub(crate) fn init_method(
 
     let Some(receiver) = receiver else {
         return Err(syn::Error::new_spanned(
-            &init_method.sig,
+            &deploy_ctor.sig,
             format!(
-                "`{contract_name}::init` must take `&mut self`; \
+                "{deploy_label} must take `&mut self`; \
                  initialization requires access to contract state"
             ),
         ));
     };
 
-    // Must be &mut self, not &self or self
     if receiver.reference.is_none() || receiver.mutability.is_none() {
         return Err(syn::Error::new_spanned(
             receiver,
             format!(
-                "`{contract_name}::init` must take `&mut self`; \
+                "{deploy_label} must take `&mut self`; \
                  initialization needs to modify contract state"
             ),
         ));
     }
 
-    // Must return () - check for default return or explicit ()
-    let returns_unit = match &init_method.sig.output {
+    let returns_unit = match &deploy_ctor.sig.output {
         ReturnType::Default => true,
         ReturnType::Type(_, ty) => {
             if let Type::Tuple(tuple) = &**ty {
@@ -254,9 +263,9 @@ pub(crate) fn init_method(
 
     if !returns_unit {
         return Err(syn::Error::new_spanned(
-            &init_method.sig.output,
+            &deploy_ctor.sig.output,
             format!(
-                "`{contract_name}::init` must return `()`; \
+                "{deploy_label} must return `()`; \
                  use `panic!` or `assert!` for initialization errors"
             ),
         ));
@@ -570,7 +579,8 @@ mod tests {
     fn test_init_method_valid() {
         let impl_block: ItemImpl = syn::parse_quote! {
             impl MyContract {
-                pub fn init(&mut self, owner: Address) {
+                #[contract(init)]
+                pub fn initialize(&mut self, owner: Address) {
                     self.owner = owner;
                 }
             }
@@ -583,7 +593,8 @@ mod tests {
     fn test_init_method_valid_no_params() {
         let impl_block: ItemImpl = syn::parse_quote! {
             impl MyContract {
-                pub fn init(&mut self) {
+                #[contract(init)]
+                pub fn initialize(&mut self) {
                     self.initialized = true;
                 }
             }
@@ -607,7 +618,8 @@ mod tests {
     fn test_init_method_immutable_self() {
         let impl_block: ItemImpl = syn::parse_quote! {
             impl MyContract {
-                pub fn init(&self, owner: Address) {}
+                #[contract(init)]
+                pub fn initialize(&self, owner: Address) {}
             }
         };
         let impl_blocks = vec![&impl_block];
@@ -619,7 +631,8 @@ mod tests {
     fn test_init_method_no_self() {
         let impl_block: ItemImpl = syn::parse_quote! {
             impl MyContract {
-                pub fn init(owner: Address) {}
+                #[contract(init)]
+                pub fn initialize(owner: Address) {}
             }
         };
         let impl_blocks = vec![&impl_block];
@@ -631,7 +644,8 @@ mod tests {
     fn test_init_method_consuming_self() {
         let impl_block: ItemImpl = syn::parse_quote! {
             impl MyContract {
-                pub fn init(self, owner: Address) {}
+                #[contract(init)]
+                pub fn initialize(self, owner: Address) {}
             }
         };
         let impl_blocks = vec![&impl_block];
@@ -643,7 +657,8 @@ mod tests {
     fn test_init_method_returns_value() {
         let impl_block: ItemImpl = syn::parse_quote! {
             impl MyContract {
-                pub fn init(&mut self, owner: Address) -> bool {
+                #[contract(init)]
+                pub fn initialize(&mut self, owner: Address) -> bool {
                     true
                 }
             }
@@ -657,7 +672,8 @@ mod tests {
     fn test_init_method_returns_result() {
         let impl_block: ItemImpl = syn::parse_quote! {
             impl MyContract {
-                pub fn init(&mut self, owner: Address) -> Result<(), Error> {
+                #[contract(init)]
+                pub fn initialize(&mut self, owner: Address) -> Result<(), Error> {
                     Ok(())
                 }
             }

@@ -1,9 +1,6 @@
 // Pins: validate::init_method::consume_self
 //
-// A private `init` method that consumes `self` must be rejected by the
-// init-specific check. (The public flavour fires the broader
-// `public_method::consume_self` rule first; this fixture keeps `init`
-// private so the init-specific path is exercised.)
+// A `#[contract(init)]` deploy constructor that consumes `self` must be rejected.
 
 use dusk_forge_contract::contract;
 
@@ -16,7 +13,8 @@ mod my_contract {
             Self
         }
 
-        fn init(self) {}
+        #[contract(init)]
+        pub fn initialize(self, seed: u64) {}
     }
 }
 

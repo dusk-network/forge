@@ -1,0 +1,5 @@
+error: method name `init` is reserved for the WASM deploy export; use a different name and mark the deploy constructor with `#[contract(init)]`
+  --> tests/compile-fail/methods/init_name_reserved.rs:17:16
+   |
+17 |         pub fn init(&mut self) {}
+   |                ^^^^

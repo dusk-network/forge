@@ -1,5 +1,5 @@
-error: `MyContract::init` must take `&mut self`; initialization needs to modify contract state
-  --> tests/compile-fail/methods/init_immutable_self.rs:17:21
+error: `MyContract::initialize` (`#[contract(init)]` deploy constructor) must take `&mut self`; initialization needs to modify contract state
+  --> tests/compile-fail/methods/init_immutable_self.rs:18:27
    |
-17 |         pub fn init(&self) {}
-   |                     ^^^^^
+18 |         pub fn initialize(&self) {}
+   |                           ^^^^^

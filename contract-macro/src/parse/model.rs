@@ -70,6 +70,8 @@ pub(crate) struct FunctionInfo {
     /// `#[contract(feeds = "Type")]`). When present, the data-driver uses
     /// this type for `decode_output_fn` instead of `output_type`.
     pub feed_type: Option<TokenStream2>,
+    /// When set, the WASM export name (e.g. `init` for `#[contract(init)]`).
+    pub wasm_export_name: Option<String>,
 }
 
 /// A contract event registered via the `#[contract(events = [...])]` module

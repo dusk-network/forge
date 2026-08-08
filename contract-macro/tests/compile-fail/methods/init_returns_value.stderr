@@ -1,5 +1,5 @@
-error: `MyContract::init` must return `()`; use `panic!` or `assert!` for initialization errors
-  --> tests/compile-fail/methods/init_returns_value.rs:18:32
+error: `MyContract::initialize` (`#[contract(init)]` deploy constructor) must return `()`; use `panic!` or `assert!` for initialization errors
+  --> tests/compile-fail/methods/init_returns_value.rs:17:49
    |
-18 |         pub fn init(&mut self) -> bool {
-   |                                ^^^^^^^
+17 |         pub fn initialize(&mut self, seed: u64) -> bool {
+   |                                                 ^^^^^^^

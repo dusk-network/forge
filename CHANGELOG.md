@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** reject inherent methods named `init` in `#[contract]` impls.
+  Mark the deploy constructor with `#[contract(init)]` on a differently named
+  method (e.g. `initialize`); the WASM export remains `init`. Contract authors
+  must migrate when upgrading to this release (`#38`).
+
+### Fixed
+
+- Prevent `init` Rust name collision with Piecrust's deploy-time `init` export,
+  which could panic with `ArchiveError(OutOfBounds)` when `init_arg` is omitted
+  (`#38`).
+
 ## [0.3.0] - 2026-05-26
 
 ### Added

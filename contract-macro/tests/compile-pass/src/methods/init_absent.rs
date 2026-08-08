@@ -1,8 +1,8 @@
 // Pins: validate::init_method::absent_ok
 //
-// A contract without an `init` method must compile: `init` is optional,
-// the host calls it only when present. `tests/test-contract/` defines an
-// `init`; this fixture pins the no-`init` shape.
+// A deploy constructor is optional: contracts without `#[contract(init)]` must
+// compile. `tests/test-contract/` uses `#[contract(init)] fn initialize`; this
+// fixture pins the no-deploy-constructor shape.
 
 #[dusk_forge::contract]
 pub mod my_contract {

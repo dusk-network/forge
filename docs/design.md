@@ -59,7 +59,7 @@ With the `#[contract]` macro, everything derives from the contract module:
 │   mod my_contract {                                                     │
 │       pub struct MyContract { ... }                                     │
 │       impl MyContract {                                                 │
-│           pub fn init(&mut self, owner: PublicKey) { ... }              │
+│           #[contract(init)] pub fn initialize(&mut self, owner: PublicKey) { ... }
 │           pub fn counter(&self) -> u64 { ... }                          │
 │           pub fn add_item(&mut self, item: Item) { ... }               │
 │       }                                                                 │
@@ -83,6 +83,8 @@ The macro expects a module containing:
 - Import statements for types used in function signatures
 - A single public struct (the contract state)
 - An impl block with a `const fn new() -> Self` constructor
+- Optionally one deploy constructor: `#[contract(init)]` on a method other than
+  `init` (the Rust name `init` is reserved; the WASM export is still `init`)
 - Public methods that become contract functions
 
 ```rust
@@ -108,8 +110,9 @@ mod my_contract {
             }
         }
 
-        /// Initializes the contract with an owner.
-        pub fn init(&mut self, owner: PublicKey) {
+        /// Initializes the contract with an owner (deploy constructor).
+        #[contract(init)]
+        pub fn initialize(&mut self, owner: PublicKey) {
             self.owner = Some(owner);
         }
 
@@ -278,7 +281,7 @@ When compiled without the `data-driver` feature, extern wrappers are generated f
 ```rust
 #[no_mangle]
 unsafe extern "C" fn init(arg_len: u32) -> u32 {
-    dusk_core::abi::wrap_call(arg_len, |owner: PublicKey| STATE.init(owner))
+    dusk_core::abi::wrap_call(arg_len, |owner: PublicKey| STATE.initialize(owner))
 }
 
 #[no_mangle]

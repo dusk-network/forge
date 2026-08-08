@@ -178,6 +178,7 @@ pub(super) fn trait_methods(trait_impl: &TraitImplInfo) -> Result<Vec<FunctionIn
                 receiver,
                 trait_name,
                 feed_type,
+                wasm_export_name: None,
             });
         }
     }
@@ -221,10 +222,23 @@ pub(super) fn public_methods(impl_block: &ItemImpl) -> Result<Vec<FunctionInfo>,
                 continue;
             }
 
+            if method.sig.ident == "init" {
+                return Err(syn::Error::new_spanned(
+                    method.sig.ident.clone(),
+                    "method name `init` is reserved for the WASM deploy export; \
+                     use a different name and mark the deploy constructor with `#[contract(init)]`",
+                ));
+            }
+
             let name = method.sig.ident.clone();
             let doc = extract_doc_comment(&method.attrs);
             let method_directives = directives::parse_contract_directives(&method.attrs)?;
             let feed_type = method_directives.feeds.clone();
+            let wasm_export_name = if method_directives.init {
+                Some("init".to_string())
+            } else {
+                None
+            };
             let receiver = extract_receiver(method);
 
             // Validate feed-related attributes
@@ -249,6 +263,7 @@ pub(super) fn public_methods(impl_block: &ItemImpl) -> Result<Vec<FunctionInfo>,
                 receiver,
                 trait_name: None, // Not a trait method
                 feed_type,
+                wasm_export_name,
             });
         }
     }
