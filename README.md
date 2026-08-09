@@ -84,7 +84,7 @@ make help      # Show all available targets
 
 The contract WASM will be at `target/contract/wasm32-unknown-unknown/release/my_contract.wasm`
 
-> **Note:** The template enables `overflow-checks = true` in release builds. This is critical for contract security - never disable it.
+> **Note:** The template sets `overflow-checks = true` in `[profile.release]`. That applies to **your contract and every dependency** in the WASM artifact. Keep it for contracts built on this template. If you **vendor third-party contract source**, read [Overflow Checks](#overflow-checks) — profile inheritance can differ from what upstream tested.
 
 ## Contract Structure
 
@@ -276,14 +276,40 @@ If a dependency has types used in function signatures, also add `name/serde` to 
 
 ### Overflow Checks
 
-Always enable overflow checks for contract safety:
+The contract template enables overflow checks in release builds:
 
 ```toml
 [profile.release]
 overflow-checks = true
 ```
 
-This prevents integer overflow vulnerabilities. The contract template includes this by default - never remove it.
+#### Default (forge-native contracts)
+
+Integer overflow in contract logic is a common vulnerability class. For contracts you develop **on this template**, keep overflow checks enabled in release.
+
+#### Profile inheritance
+
+`[profile.release]` in your `Cargo.toml` is not scoped to your crate alone. Cargo applies the same release profile settings to **every dependency** compiled into the contract WASM — not only the top-level contract crate.
+
+A dependency tested on crates.io under the default release profile may behave differently when compiled as part of your WASM build.
+
+#### Workspaces
+
+If the contract lives in a Cargo **workspace**, `[profile.release]` must be on the **workspace root** `Cargo.toml`. A member-only `[profile.release]` is ignored (Cargo warns: profiles for the non-root package will be ignored).
+
+#### Vendoring third-party contract source
+
+If you embed contract source from another project instead of depending on a published crate:
+
+- Read **both** Cargo trees — scaffold and upstream — not just one.
+- Upstream may never set `overflow-checks`; this template may force it on the whole WASM build.
+- Panics like `attempt to subtract with overflow` in `VM::ephemeral()` tests often originate inside a dependency; the host backtrace points at the test harness, not upstream source lines.
+
+Prefer published crates when possible. When vendoring source, align profiles deliberately with what upstream tested, or address dependency behavior under this profile upstream.
+
+#### Disabling overflow checks
+
+Only for a **deliberate, documented** reason (e.g. matching an upstream vendored project's known-tested profile). This weakens arithmetic safety for your code and dependencies. Do not remove the setting silently.
 
 ## Makefile Targets
 

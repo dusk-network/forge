@@ -77,6 +77,7 @@ data-driver-js = ["data-driver", "dusk-data-driver/alloc"]
 [lib]
 crate-type = ["cdylib"]
 
-# Enable overflow checks in release builds for safety
+# Release profile for contract WASM. overflow-checks applies to this crate AND
+# every dependency Cargo compiles into the same WASM artifact.
 [profile.release]
 overflow-checks = true
