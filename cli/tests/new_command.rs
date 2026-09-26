@@ -38,7 +38,8 @@ fn new_scaffolds_counter_template() {
     assert!(test.contains("release/my_test.wasm"));
     assert!(!test.contains("YOUR_CONTRACT_NAME"));
     assert!(!test.contains("TODO"));
-    assert!(rust_toolchain.contains("channel = \"stable\""));
+    // New projects get the workspace toolchain file as-is.
+    assert_eq!(rust_toolchain, include_str!("../../rust-toolchain.toml"));
 }
 
 #[test]

@@ -2,7 +2,7 @@
 name = "dusk-forge"
 version = "0.3.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 description = "A smart contract development framework for Dusk"
 license = "MPL-2.0"
 repository = "https://github.com/dusk-network/forge"
@@ -20,13 +20,13 @@ serde_json = { workspace = true, default-features = false, features = [
 dusk-core = { workspace = true }
 
 [workspace]
-resolver = "2"
+resolver = "3"
 members = ["contract-macro", "tests/types", "tests/test-contract", "cli"]
 exclude = ["contract-template"]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 
 [workspace.dependencies]
 # Workspace internal dependencies

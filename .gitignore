@@ -1,2 +1,4 @@
 **/target/
 Cargo.lock
+# The workspace lock is committed, so CI builds the dependency versions the pinned toolchain supports.
+!/Cargo.lock

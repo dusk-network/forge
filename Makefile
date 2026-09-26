@@ -2,6 +2,10 @@
 
 .PHONY: all test test-unit test-integration clippy cq fmt check doc clean help
 
+# rustfmt.toml uses unstable options, so formatting needs nightly. It's pinned because
+# formatting changes between nightlies. Override with `make fmt NIGHTLY=...`.
+NIGHTLY ?= nightly-2026-08-19
+
 all: test
 
 test: test-unit test-integration ## Run all tests
@@ -9,14 +13,16 @@ test: test-unit test-integration ## Run all tests
 test-unit: ## Run unit tests
 	@echo "Running unit tests..."
 	@cargo test -p dusk-forge-contract
+	@# Without RUSTC_WRAPPER, like clippy below, until dusk-network/.github#63 is fixed.
+	@RUSTC_WRAPPER= cargo test -p dusk-forge-cli
 	@cargo test --release
 
 test-integration: ## Run integration tests (test-contract)
 	@$(MAKE) -C tests/test-contract test
 
-fmt: ## Format code (requires nightly)
-	@rustup component add --toolchain nightly rustfmt 2>/dev/null || true
-	@cargo +nightly fmt --all $(if $(CHECK),-- --check,)
+fmt: ## Format code (requires the pinned nightly)
+	@rustup run $(NIGHTLY) rustfmt --version >/dev/null 2>&1 || rustup toolchain install $(NIGHTLY) --profile minimal --component rustfmt
+	@cargo +$(NIGHTLY) fmt --all $(if $(CHECK),-- --check,)
 
 check: ## Run cargo check on all targets
 	@cargo check --all-targets
@@ -30,7 +36,10 @@ cq: ## Run code quality checks (formatting + clippy)
 
 clippy: ## Run clippy on all workspace members
 	@echo "Running clippy..."
-	@cargo clippy --workspace --exclude test-contract --all-targets -- -D warnings
+	@# Clear RUSTC_WRAPPER: in CI, builds through sccache lose CARGO_BIN_EXE_dusk-forge,
+	@# which the CLI's integration tests read at compile time. Remove this once
+	@# dusk-network/.github#63 is fixed.
+	@RUSTC_WRAPPER= cargo clippy --workspace --exclude test-contract --all-targets -- -D warnings
 	@$(MAKE) -C tests/test-contract clippy
 
 clean: ## Clean all build artifacts
