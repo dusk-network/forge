@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `dusk-forge new` scaffolds projects pinned to Rust 1.95 [#44].
+- Raise the minimum supported Rust version of `dusk-forge` to 1.95 [#45].
+
 ## [0.3.0] - 2026-05-26
 
 ### Added
@@ -91,6 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#6]: https://github.com/dusk-network/forge/issues/6
 [#24]: https://github.com/dusk-network/forge/issues/24
 [#27]: https://github.com/dusk-network/forge/issues/27
+[#44]: https://github.com/dusk-network/forge/issues/44
+[#45]: https://github.com/dusk-network/forge/issues/45
 
 <!-- Releases -->
 [Unreleased]: https://github.com/dusk-network/forge/compare/v0.3.0...HEAD

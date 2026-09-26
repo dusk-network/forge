@@ -163,10 +163,10 @@ fn compose_rustflags(target: BuildTarget) -> String {
 
 fn home_dir_from_env() -> Option<String> {
     for key in ["HOME", "USERPROFILE"] {
-        if let Ok(value) = env::var(key) {
-            if !value.is_empty() {
-                return Some(value);
-            }
+        if let Ok(value) = env::var(key)
+            && !value.is_empty()
+        {
+            return Some(value);
         }
     }
 
