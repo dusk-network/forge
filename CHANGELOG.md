@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `dusk-forge new` scaffolds projects pinned to Rust 1.95 [#44].
 - Raise the minimum supported Rust version of `dusk-forge` to 1.95 [#45].
 
+### Fixed
+
+- Document event registration with `ContractEvent` and `#[contract(events = [...])]` in the README, replacing the outdated note that events are detected automatically.
+
 ## [0.3.0] - 2026-05-26
 
 ### Added

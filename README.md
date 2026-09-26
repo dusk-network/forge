@@ -121,19 +121,48 @@ Multiple parameters are automatically tupled.
 
 ## Events
 
-Emit events using `abi::emit`:
+Declare each event as a type that implements `ContractEvent`, and register it in the `#[contract]` module attribute. Registered events are included in the contract schema, and the data-driver decodes them by topic.
 
 ```rust
-use dusk_core::abi;
+use bytecheck::CheckBytes;
+use dusk_core::signatures::bls::PublicKey as Address;
+use dusk_forge::ContractEvent;
+use rkyv::{Archive, Deserialize, Serialize};
 
-pub fn transfer(&mut self, to: Address, amount: u64) {
-    // ... transfer logic ...
+#[derive(Archive, Serialize, Deserialize)]
+#[archive_attr(derive(CheckBytes))]
+#[cfg_attr(feature = "data-driver", derive(serde::Serialize, serde::Deserialize))]
+pub struct TransferEvent {
+    pub from: Address,
+    pub to: Address,
+    pub amount: u64,
+}
 
-    abi::emit("transfer", TransferEvent { from: self.owner, to, amount });
+impl ContractEvent for TransferEvent {
+    const TOPICS: &'static [&'static str] = &["transfer"];
+}
+
+#[dusk_forge::contract(events = [crate::TransferEvent])]
+mod my_contract {
+    use dusk_core::abi;
+    use dusk_core::signatures::bls::PublicKey as Address;
+
+    // ...
+
+    impl MyContract {
+        pub fn transfer(&mut self, to: Address, amount: u64) {
+            // ... transfer logic ...
+
+            abi::emit("transfer", crate::TransferEvent { from: self.owner, to, amount });
+        }
+    }
 }
 ```
 
-Events are automatically detected and included in the contract schema.
+- Event types need `rkyv` serialization to be emitted, and `serde` in data-driver builds to be decoded to JSON.
+- `TOPICS` can list several topics for one type, e.g. `&["ownership_transferred", "ownership_renounced"]`. Topics aren't checked at compile time: emit with a topic from the type's `TOPICS`, or the data-driver won't decode the event.
+- Define event types outside the contract module, at the crate root or in another crate, and register them by path. The contract module can't import them with `use crate::` or `use super::`, so emit crate-root types by their full path, as above. Types from another crate can be imported with `use` and emitted by their short name.
+- In the contract's own `impl` blocks and exposed trait impls, every `abi::emit` or `emit` whose data is a named type (such as a struct literal) must use a registered type, or the macro fails with "event type `…` is emitted but not registered". Emits elsewhere, such as in helper functions or trait impls that aren't exposed, aren't checked, and neither are emits of tuples, local bindings or function results. A tuple is never in the schema, so the data-driver can't decode it.
 
 ## Trait Implementations
 
