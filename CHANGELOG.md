@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Document event registration with `ContractEvent` and `#[contract(events = [...])]` in the README, replacing the outdated note that events are detected automatically.
+- Register the contract template's `count_changed` event as a `CountChanged` type, so data-drivers built from new projects can decode it.
 
 ## [0.3.0] - 2026-05-26
 

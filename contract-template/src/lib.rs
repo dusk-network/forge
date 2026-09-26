@@ -3,7 +3,7 @@
 //! This is a minimal counter contract showing:
 //! - Contract state definition
 //! - Public methods (automatically exported)
-//! - Event emission
+//! - Event registration and emission
 
 #![no_std]
 #![cfg(target_family = "wasm")]
@@ -14,8 +14,27 @@ compile_error!("Enable either 'contract' or 'data-driver' feature for WASM build
 
 extern crate alloc;
 
+use bytecheck::CheckBytes;
+use dusk_forge::ContractEvent;
+use rkyv::{Archive, Deserialize, Serialize};
+
+/// Event emitted whenever the count changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
+#[archive_attr(derive(CheckBytes))]
+#[cfg_attr(feature = "data-driver", derive(serde::Serialize, serde::Deserialize))]
+pub struct CountChanged {
+    /// The count before the change.
+    pub previous: u64,
+    /// The count after the change.
+    pub current: u64,
+}
+
+impl ContractEvent for CountChanged {
+    const TOPICS: &'static [&'static str] = &["count_changed"];
+}
+
 /// Counter contract with basic increment/decrement functionality.
-#[dusk_forge::contract]
+#[dusk_forge::contract(events = [crate::CountChanged])]
 mod counter {
     use dusk_core::abi;
 
@@ -40,21 +59,39 @@ mod counter {
         pub fn increment(&mut self) {
             let old_value = self.value;
             self.value = self.value.saturating_add(1);
-            abi::emit("count_changed", (old_value, self.value));
+            abi::emit(
+                "count_changed",
+                crate::CountChanged {
+                    previous: old_value,
+                    current: self.value,
+                },
+            );
         }
 
         /// Decrement the counter by one.
         pub fn decrement(&mut self) {
             let old_value = self.value;
             self.value = self.value.saturating_sub(1);
-            abi::emit("count_changed", (old_value, self.value));
+            abi::emit(
+                "count_changed",
+                crate::CountChanged {
+                    previous: old_value,
+                    current: self.value,
+                },
+            );
         }
 
         /// Set the counter to a specific value.
         pub fn set_count(&mut self, value: u64) {
             let old_value = self.value;
             self.value = value;
-            abi::emit("count_changed", (old_value, self.value));
+            abi::emit(
+                "count_changed",
+                crate::CountChanged {
+                    previous: old_value,
+                    current: self.value,
+                },
+            );
         }
     }
 }
