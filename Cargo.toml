@@ -55,7 +55,7 @@ predicates = "3"
 tempfile = "3"
 thiserror = "2"
 toml = "0.8"
-wasmtime = "25"
+wasmtime = "36"
 blake3 = "1"
 
 # Pin to match L1Contracts versions
